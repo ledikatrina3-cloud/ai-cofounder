@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="20" fill="#1a1410"/>
+  <text x="64" y="58" font-family="Menlo, monospace" font-size="22" font-weight="700" fill="#A8E063" text-anchor="middle" letter-spacing="-1">acme</text>
+  <text x="64" y="86" font-family="Menlo, monospace" font-size="22" font-weight="700" fill="#A8E063" text-anchor="middle" letter-spacing="-1">academy</text>
+  <rect x="22" y="100" width="84" height="3" fill="#A8E063"/>
+</svg>

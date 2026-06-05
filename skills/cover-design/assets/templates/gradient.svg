@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6D28D9"/>
+      <stop offset="100%" stop-color="#1E40AF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#g)"/>
+  <foreignObject x="80" y="160" width="1040" height="310">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, system-ui, sans-serif; color: #FFFFFF; font-size: 64px; line-height: 1.15; font-weight: 700; word-wrap: break-word;">
+      {{TITLE}}
+    </div>
+  </foreignObject>
+  <text x="80" y="570" fill="#E0E7FF" font-family="-apple-system, system-ui, sans-serif" font-size="22" font-weight="500">AI-Cofounder</text>
+</svg>

@@ -1,0 +1,85 @@
+# Marketing Content pipeline (план 2026-05-21-skills-architecture-v3, п. 3).
+#
+# Все employee-имена должны существовать как routine после
+# `pnpm dept:instantiate marketing-content` (он копирует employees/*.md в
+# routines/marketing-content-*.md).
+#
+# Скиллы research-serp, seo-audit, cover-design, analytics-traffic ещё не
+# реализованы (Фаза 6). Их routines — stubs которые отчитываются
+# «skill X не готов, пропускаю».
+
+nodes:
+  - id: research
+    employee: marketing-content-researcher
+    schedule: "0 8 * * MON,WED,FRI"
+    output: outputs/research/${date}.md
+    onFail: { retries: 2, backoff: 5m, then: alert }
+
+  - id: outline
+    employee: marketing-content-writer-editor
+    inputs: [research]
+    output: outputs/outlines/${date}.md
+    onFail: { retries: 1, then: halt }
+
+  - id: approve-theme
+    type: human-gate
+    via: telegram
+    timeout: 24h
+    onTimeout: skip-pipeline
+    inputs: [outline]
+
+  - id: draft
+    employee: marketing-content-writer-editor
+    inputs: [outline]
+    output: content/drafts/master/${date}.md
+    model: claude-sonnet-4-6
+
+  - id: seo
+    employee: marketing-content-seo-auditor
+    inputs: [draft]
+    output: outputs/seo-audits/${date}.json
+    model: claude-haiku-4-5
+    onFail: { retries: 1, then: continue }
+
+  - id: cover
+    employee: marketing-content-cover-designer
+    inputs: [draft]
+    output: content/drafts/master/${date}-cover.png
+    onFail: { retries: 0, then: continue }
+
+  - id: adapt-vc
+    employee: marketing-content-vc-publisher
+    inputs: [draft, cover]
+    output: content/drafts/vc/${date}.md
+
+  - id: adapt-dzen
+    employee: marketing-content-dzen-publisher
+    inputs: [draft, cover]
+    output: content/drafts/dzen/${date}.md
+
+  - id: approve-publish
+    type: human-gate
+    via: telegram
+    timeout: 12h
+    onTimeout: halt
+    inputs: [adapt-vc, adapt-dzen, seo]
+
+  - id: publish
+    parallel:
+      - employee: marketing-content-vc-publisher
+        input: adapt-vc
+        output: outputs/publish/vc-${date}.md
+      - employee: marketing-content-dzen-publisher
+        input: adapt-dzen
+        output: outputs/publish/dzen-${date}.md
+      - employee: marketing-content-tg-publisher
+        input: draft
+        output: outputs/publish/tg-${date}.md
+    inputs: [approve-publish]
+
+  - id: analytics
+    employee: marketing-content-analytics
+    schedule: "0 8 * * *"
+    lookback: publish:24h
+    output: outputs/analytics/${date}.json
+    inputs: [publish]

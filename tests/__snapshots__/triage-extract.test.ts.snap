@@ -1,0 +1,24 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`extractProblems — happy-path с моком LLM > mock возвращает 3 problems → result.problems.length === 3, shape совпадает 1`] = `
+{
+  "problemCount": 3,
+  "shapes": [
+    {
+      "hasSummary": true,
+      "idsCount": 5,
+      "symptomsIsArray": true,
+    },
+    {
+      "hasSummary": true,
+      "idsCount": 4,
+      "symptomsIsArray": true,
+    },
+    {
+      "hasSummary": true,
+      "idsCount": 3,
+      "symptomsIsArray": true,
+    },
+  ],
+}
+`;

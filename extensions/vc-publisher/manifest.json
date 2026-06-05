@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "vc.ru Publisher (Acme Academy)",
+  "version": "0.2.0",
+  "description": "Auto-publishes spoke articles from the AI-Cofounder framework to vc.ru via native Editor.js API",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": [
+    "https://vc.ru/*",
+    "https://api.vc.ru/*",
+    "http://localhost:7777/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://vc.ru/*"],
+      "js": ["content-bridge.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://vc.ru/*"],
+      "js": ["content-main.js"],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "vc.ru Publisher"
+  }
+}

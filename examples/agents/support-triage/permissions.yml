@@ -1,0 +1,7 @@
+tools:
+  - project.telegram.read
+  - project.read
+  - project.grep
+  - project.bash
+  - journal.search
+  - report.send

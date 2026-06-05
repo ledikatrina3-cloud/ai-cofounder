@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Утренний детектив 07:00 локального времени мака. См.:
+    plans/ (фаза 1.4)
+    src/core/triggers.ts:17 (Утренний брифинг 07:00)
+
+  Это ТЕМПЛЕЙТ. Перед `launchctl load` он подставляется скриптом
+  `pnpm install:launchd` (scripts/install-launchd.ts):
+    __PNPM_PATH__   ← `which pnpm` на маке фаундера
+    __NODE_PATH__   ← `which node`  (резерв, если когда-то потребуется явный node)
+    __REPO_PATH__   ← абсолютный путь к корню репозитория
+    __PATH_ENV__    ← PATH для дочернего процесса (директории pnpm/node + /usr/bin)
+
+  Принцип CLAUDE.md «не хардкодить динамику»: все пути дёргаются на этапе install,
+  чтобы plist в репо был воспроизводим на любой машине без ручной правки.
+
+  Запуск под launchd (а не под cron) выбран потому, что launchd — родной macOS-способ
+  и не требует включённого `cron` сервиса; пропущенный запуск (мак спал) выполняется
+  при следующем wake-up благодаря `StartCalendarInterval`.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ai-cofounder.morning-detective</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PNPM_PATH__</string>
+        <string>--silent</string>
+        <string>tick:cron</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_PATH__</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__PATH_ENV__</string>
+        <key>NODE_PATH</key>
+        <string>__NODE_PATH__</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__REPO_PATH__/dist/launchd.morning-detective.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO_PATH__/dist/launchd.morning-detective.err</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

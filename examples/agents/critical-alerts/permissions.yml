@@ -1,0 +1,3 @@
+tools:
+  - project.telegram.read
+  - report.send

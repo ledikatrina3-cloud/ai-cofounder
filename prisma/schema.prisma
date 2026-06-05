@@ -1,0 +1,231 @@
+// AI-Cofounder data layer — исполняемый источник истины модели данных.
+// Append-only граф Record + RecordLink; инварианты держатся SQLite-триггерами
+// (см. prisma/migrations/*_invariants) и проверяются tests/invariants.test.ts.
+//
+// Два кирпича: Record (append-only журнал в SQLite) и Page (индекс CompanyWiki/*.md).
+// Подтипы — через дискриминатор `type`, не через таблицу-на-сущность.
+//
+// Замечание про SQLite: native enum и Json типы в SQLite не поддерживаются
+// Prisma'ой напрямую — поэтому String + допустимые значения в комментариях
+// + JSON-Schema валидация в коде по полю `type`.
+//
+// Замечание про CHECK constraints: Prisma не генерирует их из схемы; они
+// добавляются миграцией в `prisma/migrations/.../migration.sql` после
+// `prisma migrate dev` руками. Перечень — внизу файла.
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================================
+// Record — append-only журнал.
+// ============================================================
+//
+// Допустимые `type`:
+//   event.message | event.thread | event.meeting | event.call |
+//   event.ticket | event.commit | event.trigger
+//   intent.decision | intent.plan | intent.step | intent.task |
+//   intent.promise | intent.hypothesis | intent.experiment |
+//   intent.architecture | intent.sprint | intent.proposal | intent.loop
+//   artifact.briefing | artifact.report | artifact.summary | artifact.card
+//   signal.metric | signal.anomaly | signal.pattern | signal.problem
+//   audit.action | audit.approval | audit.rejection | audit.escalation |
+//   audit.review | audit.error | audit.limit | audit.repeat | audit.cancel
+//
+// Допустимые `status`:     draft | active | closed | cancelled
+// Допустимые `actorKind`:  founder | agent | system | external
+// Допустимые `visibility`: autonomous | ask_first | secret
+
+model Record {
+  id              String       @id                       // ULID, immutable, генерируется в коде
+  type            String                                  // см. список выше
+  properties      String                                  // JSON; схема выбирается по `type`
+
+  parentId        String?
+  parent          Record?      @relation("RecordParent", fields: [parentId], references: [id], onDelete: Restrict)
+  children        Record[]     @relation("RecordParent")
+
+  actorKind       String                                  // founder | agent | system | external
+  actorRef        String?                                 // Page.path для founder/external; null для system/agent
+
+  subjectPagePath String?
+  subjectPage     Page?        @relation("RecordSubject", fields: [subjectPagePath], references: [path], onDelete: Restrict)
+
+  createdAt       DateTime     @default(now())            // immutable после INSERT
+  status          String       @default("active")
+  closedAt        DateTime?                               // ставится один раз при переходе в терминальный статус
+  closedReason    String?
+
+  dueAt           DateTime?                               // только intent.{promise,step,task}; CHECK ниже
+  priority        Int?                                    // 0..3 или null; CHECK ниже
+  visibility      String       @default("autonomous")
+
+  idempotencyKey  String?      @unique                    // обязателен для event.trigger; CHECK ниже
+
+  outgoingLinks   RecordLink[] @relation("LinkFrom")
+  incomingLinks   RecordLink[] @relation("LinkToRecord")
+  embedding       Embedding?
+
+  // Hot-path индексы — ровно под запросы, перечисленные в схеме-связей.md.
+  // Никаких «может пригодиться»: каждый индекс отрабатывает конкретную ленту.
+  @@index([type, createdAt(sort: Desc)])                  // лента событий за окно (Слой 2 → ретривер 7д)
+  @@index([type, status, dueAt])                          // открытые обещания со сроком ≤24ч
+  @@index([subjectPagePath, createdAt(sort: Desc)])       // карточка перед встречей
+  @@index([parentId, type, status])                       // дети треда / шаги задачи / разговор
+  @@index([actorKind, actorRef, createdAt(sort: Desc)])   // аудит по актору
+  @@index([status, dueAt])                                // глобально просроченное (cron «истёк дедлайн»)
+  @@index([visibility, type])                             // ленты с фильтром доступа (фаундер vs автономно)
+}
+
+// ============================================================
+// Page — денормализованный индекс CompanyWiki/*.md.
+// Источник истины — git. Эта таблица обновляется триггером
+// «Изменение в CompanyWiki/» (src/core/triggers.ts)
+// и существует ради FK-целостности и быстрых list-запросов.
+// Тело страницы НЕ дублируется — `cat` из git.
+// ============================================================
+//
+// Допустимые `type`:
+//   profile.founder | profile.member | company | product |
+//   principle | project | counterparty | candidate | archive
+
+model Page {
+  path           String       @id                         // CompanyWiki/команда/anya.md — стабилен после создания
+  type           String
+  title          String
+  parentPath     String?
+  parent         Page?        @relation("PageParent", fields: [parentPath], references: [path], onDelete: Restrict)
+  children       Page[]       @relation("PageParent")
+
+  freshnessMode  String?                                  // вечный | проверять-каждые-90-дней | null
+  tags           String       @default("[]")              // JSON-массив строк (тегам — JSON1 в SQLite)
+  updatedAt      DateTime                                 // commit time последней правки
+  gitSha         String                                   // SHA коммита последней правки
+  archived       Boolean      @default(false)
+
+  records        Record[]     @relation("RecordSubject")
+  incomingLinks  RecordLink[] @relation("LinkToPage")
+
+  @@index([type, archived])                               // «все профили команды», «активные проекты»
+  @@index([updatedAt])                                    // стареющие страницы (воскресный обзор)
+  @@index([parentPath])                                   // обход поддерева
+}
+
+// ============================================================
+// RecordLink — графовые рёбра. Заменяет реляционные FK там,
+// где конец ребра — Страница (вне БД, идентификатор — путь).
+// ============================================================
+//
+// CHECK: ровно один из (toRecordId, toPagePath) NOT NULL.
+//
+// Допустимые `linkType`:
+//   касается | следует_из | блокирует | цитирует | отвечает_на | одобряет
+
+model RecordLink {
+  id            BigInt    @id @default(autoincrement())
+  fromRecordId  String
+  fromRecord    Record    @relation("LinkFrom", fields: [fromRecordId], references: [id], onDelete: Cascade)
+
+  toRecordId    String?
+  toRecord      Record?   @relation("LinkToRecord", fields: [toRecordId], references: [id], onDelete: Restrict)
+
+  toPagePath    String?
+  toPage        Page?     @relation("LinkToPage", fields: [toPagePath], references: [path], onDelete: Restrict)
+
+  linkType      String
+  createdAt     DateTime  @default(now())
+
+  @@unique([fromRecordId, toRecordId, toPagePath, linkType])
+  @@index([toRecordId, linkType])                         // обратные ссылки на запись
+  @@index([toPagePath, linkType])                         // «всё, что касается контрагента X»
+  @@index([fromRecordId, linkType])                       // исходящие ссылки записи
+}
+
+// ============================================================
+// SyncCheckpoint — курсоры внешних источников для догона
+// пропущенных событий после простоя процесса.
+// src/core/triggers.ts.
+// ============================================================
+
+model SyncCheckpoint {
+  source     String   @id                                 // telegram | gcal | stripe | gmail
+  cursor     String                                        // update_id / syncToken / event_id курсор
+  updatedAt  DateTime @updatedAt
+}
+
+// ============================================================
+// Embedding — опциональный векторный индекс.
+// До 10K Записей висит как ускоритель, не как фундамент
+// (src/core/loop.ts).
+// Хранится в формате sqlite-vss.
+// ============================================================
+
+model Embedding {
+  recordId   String   @id
+  record     Record   @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  model      String                                       // openai-text-embedding-3-small | ...
+  vector     Bytes
+  createdAt  DateTime @default(now())
+}
+
+// ============================================================
+// CHECK constraints — ставятся руками в migration.sql
+// ============================================================
+//
+// -- Хронология:
+// CHECK (closedAt IS NULL OR closedAt >= createdAt)
+//
+// -- Идемпотентность event.trigger:
+// CHECK (
+//   (type = 'event.trigger' AND idempotencyKey IS NOT NULL)
+//   OR type <> 'event.trigger'
+// )
+//
+// -- dueAt только для типов с дедлайном:
+// CHECK (
+//   dueAt IS NULL
+//   OR type IN ('intent.promise', 'intent.step', 'intent.task')
+// )
+//
+// -- priority в шкале 0..3:
+// CHECK (priority IS NULL OR priority BETWEEN 0 AND 3)
+//
+// -- audit.* всегда autonomous-видим:
+// CHECK (
+//   (type LIKE 'audit.%' AND visibility = 'autonomous')
+//   OR type NOT LIKE 'audit.%'
+// )
+//
+// -- RecordLink: ровно один конец:
+// CHECK ((toRecordId IS NULL) <> (toPagePath IS NULL))
+//
+// ============================================================
+// Триггеры immutability — тоже ставятся руками
+// ============================================================
+//
+// -- Hard DELETE Record запрещён:
+// CREATE TRIGGER record_no_delete BEFORE DELETE ON Record
+// BEGIN SELECT RAISE(ABORT, 'Record is append-only'); END;
+//
+// -- Иммутабельные поля Record:
+// CREATE TRIGGER record_immutable_fields BEFORE UPDATE OF
+//   id, type, properties, parentId, actorKind, actorRef,
+//   subjectPagePath, idempotencyKey, createdAt
+// ON Record BEGIN
+//   SELECT RAISE(ABORT, 'Record fields are immutable after insert');
+// END;
+//
+// -- closedAt ставится один раз:
+// CREATE TRIGGER record_close_once BEFORE UPDATE OF closedAt ON Record
+// WHEN OLD.closedAt IS NOT NULL
+// BEGIN SELECT RAISE(ABORT, 'closedAt already set'); END;
+//
+// -- audit.* полностью immutable (отвергаем любой UPDATE):
+// CREATE TRIGGER audit_fully_immutable BEFORE UPDATE ON Record
+// WHEN OLD.type LIKE 'audit.%'
+// BEGIN SELECT RAISE(ABORT, 'audit.* records are fully immutable'); END;

@@ -1,0 +1,6 @@
+tools:
+  - project.db.query
+  - project.read
+  - project.grep
+  - journal.search
+  - report.send
