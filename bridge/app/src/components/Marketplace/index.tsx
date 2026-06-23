@@ -21,6 +21,7 @@ import { useSkills } from '../../hooks/useSkills.js';
 import { SkillBuilder } from '../SkillBuilder/index.js';
 import { SkillCard, SkillCardSkeleton } from './SkillCard.js';
 import { SkillDetailDrawer } from './SkillDetailDrawer.js';
+import { SkillEditor } from './SkillEditor.js';
 
 const ALL_CATEGORIES = [
   'publishing',
@@ -45,13 +46,17 @@ interface CategoryChipProps {
 }
 
 export function Marketplace(): ReactNode {
-  const { items, loading, error } = useSkills();
+  // skillRefreshKey объявляем ДО useSkills — иначе TDZ (Cannot access before
+  // initialization) роняет всю вкладку в чёрный экран.
+  const [skillRefreshKey, setSkillRefreshKey] = useState(0);
+  const { items, loading, error } = useSkills(skillRefreshKey);
   const { byName: healthByName } = useSkillHealth();
 
   const [selectedCategory, setSelectedCategory] = useState<Category | 'all'>('all');
   const [query, setQuery] = useState('');
   const [showInternal, setShowInternal] = useState(false);
   const [openSkillName, setOpenSkillName] = useState<string | null>(null);
+  const [editorSkill, setEditorSkill] = useState<string | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
 
   // Скиллы, доступные с учётом internal-чекбокса и категории.
@@ -171,6 +176,28 @@ export function Marketplace(): ReactNode {
         onClose={() => setOpenSkillName(null)}
         onSwitchSkill={(name) => setOpenSkillName(name)}
         health={openSkillName !== null ? healthByName.get(openSkillName) : undefined}
+        refreshKey={skillRefreshKey}
+        onEdit={(name) => {
+          // Закрываем drawer перед открытием редактора — иначе Escape закроет оба
+          // (ревью finding #10).
+          setOpenSkillName(null);
+          setEditorSkill(name);
+        }}
+        onDeleted={() => {
+          setOpenSkillName(null);
+          setSkillRefreshKey((k) => k + 1);
+        }}
+      />
+
+      <SkillEditor
+        skillName={editorSkill}
+        onClose={() => setEditorSkill(null)}
+        onSaved={(name) => {
+          setEditorSkill(null);
+          // Инвалидируем кэш detail + рефрешим список, потом снова открываем.
+          setSkillRefreshKey((k) => k + 1);
+          setOpenSkillName(name);
+        }}
       />
 
       {builderOpen && (

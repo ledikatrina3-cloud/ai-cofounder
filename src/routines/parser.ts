@@ -138,6 +138,11 @@ const VALID_OUTPUT_TYPES = new Set<RoutineOutputType>(['telegram-thread', 'journ
 // реально существует у Anthropic / Voyage — это runtime-задача `src/llm/call.ts`.
 const VALID_MODEL_PREFIX_RE = /^(claude|voyage)-[a-z0-9.-]+$/i;
 
+// id агента/routine — kebab-case. Вшивается в launchd-plist XML
+// (com.ai-cofounder.routine-<id>), поэтому валидируем на read-пути как
+// defense-in-depth против XML-инъекции. Один регэксп на read+write.
+export const ROUTINE_ID_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
 const REQUIRED_SCALAR_FIELDS = [
   'id',
   'projectId',
@@ -389,6 +394,12 @@ export function parseRoutineSource(filePath: string, source: string): Routine {
   }
 
   const id = requireScalar(filePath, scalars, 'id');
+  if (!ROUTINE_ID_RE.test(id)) {
+    throw new RoutineParseError(
+      filePath,
+      `id '${id}' должно быть kebab-case (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$).`,
+    );
+  }
   const projectId = requireScalar(filePath, scalars, 'projectId');
   const enabled = parseBool(filePath, requireScalar(filePath, scalars, 'enabled'), 'enabled');
   const trigger = validateTrigger(filePath, requireScalar(filePath, scalars, 'trigger'));

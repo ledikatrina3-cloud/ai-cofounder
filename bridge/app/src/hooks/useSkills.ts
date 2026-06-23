@@ -58,11 +58,12 @@ interface ListResponse {
  * сбоях (оставляет последний успешный массив). При первом empty-фейле
  * выставляет error — UI покажет «Bridge offline, запусти pnpm bridge:start».
  */
-export function useSkills(): UseSkillsResult {
+export function useSkills(refreshKey = 0): UseSkillsResult {
   const [items, setItems] = useState<SkillListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey — trigger-only, форсит немедленный re-fetch списка после create/edit/delete скилла
   useEffect(() => {
     let cancelled = false;
 
@@ -95,7 +96,7 @@ export function useSkills(): UseSkillsResult {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [refreshKey]);
 
   return { items, loading, error };
 }
@@ -118,13 +119,19 @@ interface DetailResponse {
   error?: string;
 }
 
-export function useSkillDetail(name: string | null): UseSkillDetailResult {
+export function useSkillDetail(name: string | null, refreshKey = 0): UseSkillDetailResult {
   const [skill, setSkill] = useState<SkillFull | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cache = useRef<Map<string, SkillFull>>(new Map());
+  const cacheKey = useRef(refreshKey);
 
   useEffect(() => {
+    // refreshKey сменился → инвалидируем кэш, иначе отдадим протухший skill.
+    if (cacheKey.current !== refreshKey) {
+      cache.current.clear();
+      cacheKey.current = refreshKey;
+    }
     if (name === null) {
       setSkill(null);
       setError(null);
@@ -168,7 +175,7 @@ export function useSkillDetail(name: string | null): UseSkillDetailResult {
     return () => {
       cancelled = true;
     };
-  }, [name]);
+  }, [name, refreshKey]);
 
   return { skill, loading, error };
 }

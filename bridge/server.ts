@@ -1,5 +1,5 @@
 // Bridge HTTP-сервер на localhost:BRIDGE_PORT (default 3737).
-// Источник дизайна: bridge/server.ts L132 + L162-175 (LIVE-режим
+// Источник дизайна: architecture/10-оболочка-bridge/мостик.md L132 + L162-175 (LIVE-режим
 // принимает hooks от claude-code, AI-Cofounder POST'ит сюда же из src/observe/bridge.ts).
 //
 // Контракты:
@@ -22,9 +22,24 @@ import { pathToFileURL } from 'node:url';
 import { serve } from '@hono/node-server';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
+import {
+  type AgentCreateInput,
+  type AgentUpdatePatch,
+  AgentWriteError,
+  createAgent,
+  deleteAgent,
+  updateAgent,
+} from './agents-write.js';
 import { bridgePort } from './config.js';
+import {
+  type DepartmentCreateInput,
+  DepartmentWriteError,
+  createDepartment,
+  deleteDepartment,
+} from './departments-write.js';
 import { getBridgeBus } from './event-bus.js';
 import type { BridgeEvent } from './events.js';
 import { type JsonlSession, startJsonlSession } from './jsonl-writer.js';
@@ -42,9 +57,20 @@ import {
   resolveRoutineSkillsForUi,
 } from './routines-api.js';
 import {
+  type RoutineCreateInput,
+  type RoutinePatchLike,
+  RoutineWriteError,
+  createRoutine,
+  deleteRoutine,
+  updateRoutine,
+} from './routines-write.js';
+import {
   type SkillBuilderHistoryItem,
+  deleteSkill,
   handleSkillBuilderMessage,
+  readSkillRaw,
   saveNewSkill,
+  updateSkill,
 } from './skill-builder.js';
 
 // Dynamic-loaded chat-handler. bridge tsconfig изолирован (rootDir=bridge), поэтому
@@ -90,6 +116,17 @@ async function loadAnalyticsQueries(): Promise<AnalyticsQueriesMod> {
   const mod = (await import(pathToFileURL(modPath).href)) as AnalyticsQueriesMod;
   cachedAnalyticsQueries = mod;
   return cachedAnalyticsQueries;
+}
+
+// Классификация ошибок skill-эндпоинтов в HTTP-статус (ревью findings #3/#4).
+// По умолчанию 400 (ошибка ввода/валидации parser'а); 500 только для системных
+// FS/loader-ошибок; 404 — не найден; 409 — конфликт. Раньше POST /skills по
+// подстрокам считал валидационные ошибки серверными (500).
+function skillErrorStatus(msg: string): 400 | 404 | 409 | 500 {
+  if (/ENOENT|EACCES|EPERM|ENOSPC|Cannot find module|ERR_MODULE_NOT_FOUND/.test(msg)) return 500;
+  if (msg.includes('не найден')) return 404;
+  if (msg.includes('уже существует')) return 409;
+  return 400;
 }
 
 function analyticsErrorBody(err: unknown): { ok: false; error: string } {
@@ -439,7 +476,7 @@ export async function startBridgeServer(
 
   // In-memory ring-buffer событий для replay на новое SSE-подключение
   // (план 2026-05-22, фикс «UI открывается посреди прогона — буфер пуст»).
-  // Размер выбран чтобы покрыть один тяжёлый workflow (build-guide
+  // Размер выбран чтобы покрыть один тяжёлый workflow (article-writing
   // выдаёт ~200-400 events за 14 этапов). При переполнении — drop oldest.
   // Память: 800 × ~1KB = ~800KB, приемлемо для одного host-процесса.
   const RECENT_BUFFER_MAX = 800;
@@ -506,23 +543,41 @@ export async function startBridgeServer(
   // bridge-server (http://127.0.0.1:3737). Браузер блокирует fetch без явного
   // Access-Control-Allow-Origin. В Electron-режиме это не нужно (renderer и
   // server в одном процессе), но bridge:server + browser UI требует.
-  // Слушаем только localhost — credentials="omit", origin="*" безопасно
-  // (порт всё равно 127.0.0.1, наружу не торчит).
+  //
+  // Security (ревью 2026-06-22, finding #2): сервер без auth, а write-эндпоинты
+  // (CRUD routines/departments/skills, schedule/apply → launchd) опасны. Раньше
+  // CORS для неизвестного origin отдавал '*' — любой сайт в браузере фаундера мог
+  // слать мутации (CSRF/cross-origin). Теперь: (1) неизвестный origin → НЕ '*';
+  // (2) для unsafe-методов жёсткая server-side проверка Origin (origin-guard ниже)
+  // — она ловит даже simple-request обход, где preflight не срабатывает.
+  const isLocalOrigin = (origin: string): boolean =>
+    origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
   app.use(
     '*',
     cors({
-      origin: (origin) =>
-        origin !== undefined &&
-        (origin.startsWith('http://localhost:') ||
-          origin.startsWith('http://127.0.0.1:') ||
-          origin === 'null')
-          ? origin
-          : '*',
-      allowMethods: ['GET', 'POST', 'OPTIONS'],
+      origin: (origin) => (origin !== undefined && isLocalOrigin(origin) ? origin : ''),
+      allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowHeaders: ['content-type'],
       maxAge: 86400,
     }),
   );
+
+  // Origin-guard для мутаций: браузер ВСЕГДА шлёт Origin на cross-origin (включая
+  // simple-request). Запросы без Origin (server-to-server: claude-code-hooks,
+  // cron, curl) пропускаем — CSRF из браузера им не грозит. Cross-site браузерный
+  // POST/PUT/PATCH/DELETE с чужим Origin → 403, независимо от CORS-заголовков.
+  app.use('*', async (c, next) => {
+    const method = c.req.method;
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+    const origin = c.req.header('origin');
+    if (origin !== undefined && !isLocalOrigin(origin)) {
+      return c.json(
+        { ok: false, error: 'forbidden: cross-origin мутации запрещены (CSRF-guard)' },
+        403,
+      );
+    }
+    return next();
+  });
 
   app.get('/healthz', (c) =>
     c.json({ ok: true, sessionId: session.sessionId, jsonlPath: session.filePath, port }),
@@ -542,7 +597,7 @@ export async function startBridgeServer(
       checks.push({
         name: 'LLM transport: oauth (gateway)',
         ok: true,
-        detail: `${gw} · подписка claude.ai (см. src/llm/transport.ts). API-key не требуется.`,
+        detail: `${gw} · подписка claude.ai (src/llm/transport.ts). API-key не требуется.`,
       });
     } else {
       const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -576,11 +631,17 @@ export async function startBridgeServer(
       });
     }
     const projectsPath = resolve(process.cwd(), 'config', 'projects.md');
-    const projectsOk = existsSync(projectsPath);
+    const projectsExists = existsSync(projectsPath);
+    // config/projects.md ОПЦИОНАЛЕН (агенты agents/<id>/ работают без него), поэтому
+    // его отсутствие НЕ роняет агрегатный health — иначе свежий OSS-клон (целевой
+    // юзер фичи) показывал бы «нездоров» из-за файла, который сам же помечен опц.
+    // (ревью D3-1). ok:true всегда; факт наличия — в detail.
     checks.push({
-      name: 'project example-project',
-      ok: projectsOk,
-      detail: projectsOk ? projectsPath : 'нет config/projects.md — chat-handler упадёт',
+      name: 'config/projects.md',
+      ok: true,
+      detail: projectsExists
+        ? projectsPath
+        : "отсутствует (опционально: нужен только для cross-project routine'ов; агенты agents/<id>/ работают без него)",
     });
     const allOk = checks.every((c) => c.ok);
     return c.json({ ok: allOk, checks });
@@ -704,10 +765,10 @@ export async function startBridgeServer(
   // — через better-sqlite3 read-only поверх таблицы Record (audit.routine.*,
   // event.routine.trigger, audit.spend).
   //
-  // Загрузка реестра дороже, чем чтение БД (fast-glob + чтение каждого файла),
-  // но кэшируется в loadListRoutines (модульный singleton) — re-load происходит
-  // только при первом запросе или после рестарта процесса. Если фаундер
-  // добавил routine — рестарт `bridge:server` (быстро, ~1 сек).
+  // loadListRoutines кэширует только ИМПОРТ модуля-реестра (singleton-ссылку на
+  // listRoutines), а сама listRoutines на каждый запрос перечитывает диск
+  // (fast-glob + чтение каждого файла). Поэтому мутации (create/edit/delete агента
+  // из UI) видны на следующем poll БЕЗ рестарта — это и нужно для CRUD из браузера.
   app.get('/routines', async (c) => {
     try {
       const listRoutines = await loadListRoutines();
@@ -834,6 +895,21 @@ export async function startBridgeServer(
   // GET /skills/:name — полный DTO одного скилла. Включает body SKILL.md
   // (markdown), permissions из permissions.md, dependsOn, usedBy. Это то,
   // что рендерит SkillDetailDrawer в маркетплейсе. 404 если скилла нет.
+  // GET /skills/:name/raw — сырые SKILL.md + permissions.md для prefill
+  // edit-режима (Ф5). Объявлен ДО /skills/:name (3-сегментный путь, но порядок
+  // для ясности). name проходит kebab-валидацию в readSkillRaw.
+  app.get('/skills/:name/raw', async (c) => {
+    const name = c.req.param('name');
+    if (name === undefined) return c.json({ ok: false, error: 'name-required' }, 400);
+    try {
+      const raw = await readSkillRaw(name);
+      return c.json({ ok: true, ...raw });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ ok: false, error: msg }, skillErrorStatus(msg));
+    }
+  });
+
   app.get('/skills/:name', async (c) => {
     const name = c.req.param('name');
     try {
@@ -850,6 +926,40 @@ export async function startBridgeServer(
           ? '. Запусти `pnpm exec tsc -p tsconfig.json` чтобы появился dist/src/skills/registry.js'
           : '';
       return c.json({ ok: false, error: `${msg}${hint}` }, 500);
+    }
+  });
+
+  // PUT /skills/:name — перезапись существующего скилла (Ф5). DELETE — удаление.
+  app.put('/skills/:name', async (c) => {
+    const name = c.req.param('name');
+    if (name === undefined) return c.json({ ok: false, error: 'name-required' }, 400);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: 'invalid-json' }, 400);
+    }
+    const o = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+    const skillMd = typeof o.skillMd === 'string' ? o.skillMd : '';
+    const permissionsMd = typeof o.permissionsMd === 'string' ? o.permissionsMd : '';
+    try {
+      const res = await updateSkill({ name, skillMd, permissionsMd });
+      return c.json({ ok: true, ...res });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ ok: false, error: msg }, skillErrorStatus(msg));
+    }
+  });
+
+  app.delete('/skills/:name', async (c) => {
+    const name = c.req.param('name');
+    if (name === undefined) return c.json({ ok: false, error: 'name-required' }, 400);
+    try {
+      const res = await deleteSkill(name);
+      return c.json({ ok: true, ...res });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ ok: false, error: msg }, skillErrorStatus(msg));
     }
   });
 
@@ -875,14 +985,7 @@ export async function startBridgeServer(
       return c.json({ ok: true, ...created });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Различаем валидацонные / конфликт / system ошибки по сообщению.
-      const isClient =
-        msg.includes('name') ||
-        msg.includes('уже существует') ||
-        msg.includes('frontmatter') ||
-        msg.includes('SKILL.md') ||
-        msg.includes('permissions');
-      return c.json({ ok: false, error: msg }, isClient ? 400 : 500);
+      return c.json({ ok: false, error: msg }, skillErrorStatus(msg));
     }
   });
 
@@ -985,6 +1088,439 @@ export async function startBridgeServer(
       const hint =
         msg.includes('Cannot find module') || msg.includes('ERR_MODULE_NOT_FOUND')
           ? '. Запусти `pnpm exec tsc -p tsconfig.json` чтобы появился dist/src/core/dispatcher.js'
+          : '';
+      return c.json({ ok: false, error: `${msg}${hint}` }, 500);
+    }
+  });
+
+  // GET /projects — список проектов из config/projects.md для UI (дропдаун при
+  // создании агента + вывод id-префикса). 'self' (синтетический owner agents/<id>/)
+  // не отдаём — это отдельный формат, не редактируется этим UI.
+  app.get('/projects', async (c) => {
+    try {
+      const modPath = resolve(process.cwd(), 'dist', 'src', 'projects', 'registry.js');
+      const mod = (await import(pathToFileURL(modPath).href)) as {
+        listProjects: (opts?: {
+          cwd?: string;
+          includeSelfProject?: boolean;
+        }) => Promise<Array<{ id: string; name: string; routinesGlob: string; enabled: boolean }>>;
+      };
+      // includeSelfProject:true — чтобы при ОТСУТСТВУЮЩЕМ config/projects.md
+      // registry не бросал (свежий OSS-клон без проектов), а отдал только
+      // синтетический 'self', который ниже отфильтровываем → items=[]. Так UI
+      // получает пустой список (агент создаётся в agents/<id>/, проект не нужен),
+      // а не 500.
+      const projects = await mod.listProjects({ cwd: process.cwd(), includeSelfProject: true });
+      const items = projects
+        .filter((p) => p.id !== 'self')
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          routinesGlob: p.routinesGlob,
+          enabled: p.enabled,
+        }));
+      return c.json({ ok: true, items });
+    } catch (err) {
+      console.error('[projects]', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      const hint =
+        msg.includes('Cannot find module') || msg.includes('ERR_MODULE_NOT_FOUND')
+          ? '. Запусти `pnpm exec tsc` чтобы появился dist/src/projects/registry.js'
+          : '';
+      return c.json({ ok: false, error: `${msg}${hint}` }, 500);
+    }
+  });
+
+  // ── Departments (Ф4) ───────────────────────────────────────────────────────
+  // GET /departments — отделы + кол-во членов (routines с этим departmentId).
+  app.get('/departments', async (c) => {
+    try {
+      const deptPath = resolve(process.cwd(), 'dist', 'src', 'departments', 'registry.js');
+      const deptMod = (await import(pathToFileURL(deptPath).href)) as {
+        listDepartments: (opts?: {
+          cwd?: string;
+        }) => Promise<Array<{ id: string; name: string; description: string; budget?: unknown }>>;
+      };
+      const departments = await deptMod.listDepartments({ cwd: process.cwd() });
+      // Считаем членов: routines с departmentId.
+      const listRoutines = await loadListRoutines();
+      const routines = (await listRoutines()) as Array<{ id: string; departmentId?: string }>;
+      const items = departments.map((d) => {
+        const members = routines.filter((r) => r.departmentId === d.id).map((r) => r.id);
+        return { id: d.id, name: d.name, description: d.description, budget: d.budget, members };
+      });
+      return c.json({ ok: true, items });
+    } catch (err) {
+      console.error('[departments]', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      const hint =
+        msg.includes('Cannot find module') || msg.includes('ERR_MODULE_NOT_FOUND')
+          ? '. Запусти `pnpm exec tsc` чтобы появился dist/src/departments/registry.js'
+          : '';
+      return c.json({ ok: false, error: `${msg}${hint}` }, 500);
+    }
+  });
+
+  app.post('/departments', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: 'invalid-json' }, 400);
+    }
+    const o = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+    for (const k of ['id', 'name', 'description']) {
+      if (typeof o[k] !== 'string' || (o[k] as string) === '') {
+        return c.json({ ok: false, error: `поле '${k}' обязательно (непустая строка)` }, 400);
+      }
+    }
+    const input: DepartmentCreateInput = {
+      id: o.id as string,
+      name: o.name as string,
+      description: o.description as string,
+    };
+    if (typeof o.budget === 'object' && o.budget !== null) {
+      const b = o.budget as Record<string, unknown>;
+      if (typeof b.perDayUsd === 'number' && typeof b.perRunUsd === 'number') {
+        input.budget = { perDayUsd: b.perDayUsd, perRunUsd: b.perRunUsd };
+      }
+    }
+    try {
+      const res = await createDepartment(input);
+      return c.json(res, 201);
+    } catch (err) {
+      if (err instanceof DepartmentWriteError) {
+        return c.json({ ok: false, error: err.message }, err.status);
+      }
+      console.error('[POST /departments]', err);
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.delete('/departments/:id', async (c) => {
+    const id = c.req.param('id');
+    if (id === undefined) return c.json({ ok: false, error: 'id-required' }, 400);
+    try {
+      const res = await deleteDepartment(id);
+      return c.json(res);
+    } catch (err) {
+      if (err instanceof DepartmentWriteError) {
+        return c.json({ ok: false, error: err.message }, err.status);
+      }
+      console.error('[DELETE /departments/:id]', err);
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  // ── Routine CRUD (Ф1 плана 2026-06-22-bridge-control-panel) ────────────────
+  // Запись на диск через bridge/routines-write.ts: dist-serializer + защита от
+  // path-traversal + атомарная запись (temp+rename). GET /routines читает реестр
+  // с диска заново на каждый запрос, поэтому после мутации UI видит изменения на
+  // следующем poll'е — инвалидация кэша не нужна.
+  const asStrArray = (v: unknown): string[] | undefined =>
+    Array.isArray(v) && v.every((x) => typeof x === 'string') ? (v as string[]) : undefined;
+
+  app.post('/routines', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: 'invalid-json' }, 400);
+    }
+    const o = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+
+    // Маршрутизация формата. Реальный projectId (не пустой и не 'self') → legacy
+    // routines/<id>.md (нужен проект из config/projects.md). Иначе (по умолчанию) —
+    // самодостаточный agents/<id>/, привязанный к синтетическому 'self':
+    // config/projects.md НЕ требуется. Это путь «создать агента из браузера без
+    // ручной правки файлов» (план 2026-06-23).
+    const reqProjectId = typeof o.projectId === 'string' ? o.projectId : '';
+    const isLegacy = reqProjectId !== '' && reqProjectId !== 'self';
+
+    if (!isLegacy) {
+      for (const k of ['id', 'trigger', 'model', 'outputType', 'description', 'prompt']) {
+        if (typeof o[k] !== 'string' || (o[k] as string) === '') {
+          return c.json({ ok: false, error: `поле '${k}' обязательно (непустая строка)` }, 400);
+        }
+      }
+      if (typeof o.enabled !== 'boolean') {
+        return c.json({ ok: false, error: "поле 'enabled' обязательно (boolean)" }, 400);
+      }
+      // displayName = role (имя «сотрудника» в офисе). Fallback на id.
+      const displayName =
+        typeof o.role === 'string' && o.role.trim() !== ''
+          ? o.role.trim()
+          : typeof o.displayName === 'string' && o.displayName.trim() !== ''
+            ? o.displayName.trim()
+            : (o.id as string);
+      const agentInput: AgentCreateInput = {
+        id: o.id as string,
+        displayName,
+        description: o.description as string,
+        prompt: o.prompt as string,
+        model: o.model as string,
+        enabled: o.enabled,
+        trigger: o.trigger as string,
+        outputType: o.outputType as string,
+      };
+      if (typeof o.maxTokens === 'number') agentInput.maxTokens = o.maxTokens;
+      if (typeof o.timeoutMs === 'number') agentInput.timeoutMs = o.timeoutMs;
+      if (typeof o.avatar === 'string' && o.avatar !== '') agentInput.avatar = o.avatar;
+      if (typeof o.color === 'string' && o.color !== '') agentInput.color = o.color;
+      if (typeof o.logo === 'string' && o.logo !== '') agentInput.logo = o.logo;
+      if (typeof o.departmentId === 'string' && o.departmentId !== '')
+        agentInput.departmentId = o.departmentId;
+      const aSkills = asStrArray(o.skills);
+      if (aSkills !== undefined) agentInput.skills = aSkills;
+      const aForce = asStrArray(o.forceLoad);
+      if (aForce !== undefined) agentInput.forceLoad = aForce;
+      const aTools = asStrArray(o.tools);
+      if (aTools !== undefined && aTools.length > 0) agentInput.tools = aTools;
+      const aBash = asStrArray(o.bashWhitelist);
+      if (aBash !== undefined && aBash.length > 0) agentInput.bashWhitelist = aBash;
+      try {
+        const res = await createAgent(agentInput);
+        return c.json(res, 201);
+      } catch (err) {
+        if (err instanceof AgentWriteError) {
+          return c.json({ ok: false, error: err.message }, err.status);
+        }
+        console.error('[POST /routines:agent]', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        const hint =
+          msg.includes('Cannot find module') || msg.includes('ERR_MODULE_NOT_FOUND')
+            ? '. Запусти `pnpm exec tsc` чтобы появился dist/src/routines/agent-serializer.js'
+            : '';
+        return c.json({ ok: false, error: `${msg}${hint}` }, 500);
+      }
+    }
+
+    // ── legacy routines/<id>.md (явно задан реальный projectId) ──
+    for (const k of [
+      'id',
+      'projectId',
+      'trigger',
+      'model',
+      'outputType',
+      'description',
+      'prompt',
+    ]) {
+      if (typeof o[k] !== 'string' || (o[k] as string) === '') {
+        return c.json({ ok: false, error: `поле '${k}' обязательно (непустая строка)` }, 400);
+      }
+    }
+    if (typeof o.enabled !== 'boolean') {
+      return c.json({ ok: false, error: "поле 'enabled' обязательно (boolean)" }, 400);
+    }
+    const tools = asStrArray(o.tools);
+    if (tools === undefined) {
+      return c.json({ ok: false, error: "поле 'tools' обязательно (массив строк)" }, 400);
+    }
+    if (typeof o.maxTokens !== 'number' || typeof o.timeoutMs !== 'number') {
+      return c.json({ ok: false, error: "'maxTokens' и 'timeoutMs' обязательны (числа)" }, 400);
+    }
+    const input: RoutineCreateInput = {
+      id: o.id as string,
+      projectId: o.projectId as string,
+      enabled: o.enabled,
+      trigger: o.trigger as string,
+      tools,
+      model: o.model as string,
+      maxTokens: o.maxTokens,
+      timeoutMs: o.timeoutMs,
+      outputType: o.outputType as string,
+      description: o.description as string,
+      prompt: o.prompt as string,
+    };
+    if (typeof o.role === 'string') input.role = o.role;
+    if (typeof o.avatar === 'string') input.avatar = o.avatar;
+    if (typeof o.color === 'string') input.color = o.color;
+    if (typeof o.logo === 'string') input.logo = o.logo;
+    const bw = asStrArray(o.bashWhitelist);
+    if (bw !== undefined) input.bashWhitelist = bw;
+    const sk = asStrArray(o.skills);
+    if (sk !== undefined) input.skills = sk;
+    const fl = asStrArray(o.forceLoad);
+    if (fl !== undefined) input.forceLoad = fl;
+    if (typeof o.departmentId === 'string') input.departmentId = o.departmentId;
+    if (typeof o.targetProject === 'string') input.targetProject = o.targetProject;
+
+    try {
+      const res = await createRoutine(input);
+      return c.json(res, 201);
+    } catch (err) {
+      if (err instanceof RoutineWriteError) {
+        return c.json({ ok: false, error: err.message }, err.status);
+      }
+      console.error('[POST /routines]', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      const hint =
+        msg.includes('Cannot find module') || msg.includes('ERR_MODULE_NOT_FOUND')
+          ? '. Запусти `pnpm exec tsc` чтобы появился dist/src/routines/serializer.js'
+          : '';
+      return c.json({ ok: false, error: `${msg}${hint}` }, 500);
+    }
+  });
+
+  // PUT и PATCH — частичное обновление (applyRoutinePatch по своей природе
+  // частичный; id/projectId сменить нельзя — они фиксируют discovery). Для
+  // опциональных полей null = удалить строку из frontmatter.
+  const coerceRoutinePatch = (o: Record<string, unknown>): RoutinePatchLike => {
+    const patch: RoutinePatchLike = {};
+    if (typeof o.enabled === 'boolean') patch.enabled = o.enabled;
+    if (typeof o.trigger === 'string') patch.trigger = o.trigger;
+    if (typeof o.model === 'string') patch.model = o.model;
+    if (typeof o.maxTokens === 'number') patch.maxTokens = o.maxTokens;
+    if (typeof o.timeoutMs === 'number') patch.timeoutMs = o.timeoutMs;
+    if (typeof o.outputType === 'string') patch.outputType = o.outputType;
+    if (typeof o.description === 'string') patch.description = o.description;
+    if (typeof o.prompt === 'string') patch.prompt = o.prompt;
+    const tools = asStrArray(o.tools);
+    if (tools !== undefined) patch.tools = tools;
+    // Nullable: значение — установить, null — удалить, отсутствие — не трогать.
+    for (const k of ['role', 'avatar', 'color', 'logo', 'departmentId', 'targetProject'] as const) {
+      if (o[k] === null) patch[k] = null;
+      else if (typeof o[k] === 'string') patch[k] = o[k] as string;
+    }
+    for (const k of ['bashWhitelist', 'skills', 'forceLoad'] as const) {
+      if (o[k] === null) patch[k] = null;
+      else {
+        const arr = asStrArray(o[k]);
+        if (arr !== undefined) patch[k] = arr;
+      }
+    }
+    return patch;
+  };
+
+  // Патч для agents/<id>/ (нет projectId/targetProject — формат привязан к 'self').
+  const coerceAgentPatch = (o: Record<string, unknown>): AgentUpdatePatch => {
+    const patch: AgentUpdatePatch = {};
+    // У агента role == displayName (имя «сотрудника»). Пустой не шлём — это
+    // обязательное поле AGENT.md, валидация всё равно отвергла бы.
+    if (typeof o.role === 'string' && o.role.trim() !== '') patch.displayName = o.role.trim();
+    if (typeof o.enabled === 'boolean') patch.enabled = o.enabled;
+    if (typeof o.trigger === 'string') patch.trigger = o.trigger;
+    if (typeof o.model === 'string') patch.model = o.model;
+    if (typeof o.maxTokens === 'number') patch.maxTokens = o.maxTokens;
+    if (typeof o.timeoutMs === 'number') patch.timeoutMs = o.timeoutMs;
+    if (typeof o.outputType === 'string') patch.outputType = o.outputType;
+    if (typeof o.description === 'string') patch.description = o.description;
+    if (typeof o.prompt === 'string') patch.prompt = o.prompt;
+    for (const k of ['avatar', 'color', 'logo', 'departmentId'] as const) {
+      if (o[k] === null) patch[k] = null;
+      else if (typeof o[k] === 'string') patch[k] = o[k] as string;
+    }
+    for (const k of ['skills', 'forceLoad'] as const) {
+      if (o[k] === null) patch[k] = null;
+      else {
+        const arr = asStrArray(o[k]);
+        if (arr !== undefined) patch[k] = arr;
+      }
+    }
+    const tools = asStrArray(o.tools);
+    if (tools !== undefined) patch.tools = tools;
+    const bash = asStrArray(o.bashWhitelist);
+    if (bash !== undefined) patch.bashWhitelist = bash;
+    return patch;
+  };
+
+  // Рантайм-Routine шире узкого RoutineRecord: содержит agentDir для agents/<id>/.
+  // По его наличию маршрутизируем UPDATE/DELETE на agents-write vs routines-write.
+  const findRoutineRaw = async (id: string): Promise<Record<string, unknown> | null> => {
+    const listRoutines = await loadListRoutines();
+    const routines = (await listRoutines()) as unknown as Array<Record<string, unknown>>;
+    return routines.find((r) => r.id === id) ?? null;
+  };
+  const isAgentRecord = (r: Record<string, unknown> | null): boolean =>
+    r !== null && typeof r.agentDir === 'string' && r.agentDir !== '';
+
+  const handleRoutineUpdate = async (c: Context): Promise<Response> => {
+    const id = c.req.param('id');
+    if (id === undefined) return c.json({ ok: false, error: 'id-required' }, 400);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: 'invalid-json' }, 400);
+    }
+    const o = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+    try {
+      const existing = await findRoutineRaw(id);
+      const res = isAgentRecord(existing)
+        ? await updateAgent(id, coerceAgentPatch(o))
+        : await updateRoutine(id, coerceRoutinePatch(o));
+      return c.json(res);
+    } catch (err) {
+      if (err instanceof RoutineWriteError || err instanceof AgentWriteError) {
+        return c.json({ ok: false, error: err.message }, err.status);
+      }
+      console.error('[PUT/PATCH /routines/:id]', err);
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  };
+  app.put('/routines/:id', handleRoutineUpdate);
+  app.patch('/routines/:id', handleRoutineUpdate);
+
+  app.delete('/routines/:id', async (c) => {
+    const id = c.req.param('id');
+    if (id === undefined) return c.json({ ok: false, error: 'id-required' }, 400);
+    try {
+      const existing = await findRoutineRaw(id);
+      const res = isAgentRecord(existing) ? await deleteAgent(id) : await deleteRoutine(id);
+      return c.json(res);
+    } catch (err) {
+      if (err instanceof RoutineWriteError || err instanceof AgentWriteError) {
+        return c.json({ ok: false, error: err.message }, err.status);
+      }
+      console.error('[DELETE /routines/:id]', err);
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  // POST /routines/:id/schedule/apply — применить расписание к launchd (Ф3).
+  // Опасно: мутирует живой планировщик мака, поэтому вызывается ТОЛЬКО по явному
+  // подтверждению из UI. enabled+cron → пишет plist + launchctl load; manual или
+  // disabled → unload + удаляет plist. Возвращает action + nextRunAt.
+  app.post('/routines/:id/schedule/apply', async (c) => {
+    const id = c.req.param('id');
+    if (id === undefined) return c.json({ ok: false, error: 'id-required' }, 400);
+    // Планировщик в v1 — только launchd (macOS). На других ОС честно говорим, а не
+    // падаем cryptic-ошибкой `launchctl: command not found` из глубины.
+    if (process.platform !== 'darwin') {
+      return c.json(
+        {
+          ok: false,
+          error:
+            'Применение расписания работает только на macOS (launchd). На этой ОС запускай агента вручную кнопкой «Запустить» или настрой cron/systemd-timer сам.',
+        },
+        400,
+      );
+    }
+    try {
+      const regPath = resolve(process.cwd(), 'dist', 'src', 'routines', 'registry.js');
+      const launchdPath = resolve(process.cwd(), 'dist', 'src', 'routines', 'launchd.js');
+      const reg = (await import(pathToFileURL(regPath).href)) as {
+        getRoutine: (id: string, opts?: { cwd?: string }) => Promise<RoutineRecord | null>;
+      };
+      const launchd = (await import(pathToFileURL(launchdPath).href)) as {
+        applyRoutineSchedule: (
+          routine: unknown,
+          opts?: { repoRoot?: string },
+        ) => { action: string; plistPath?: string; reason: string };
+      };
+      const routine = await reg.getRoutine(id, { cwd: process.cwd() });
+      if (routine === null) {
+        return c.json({ ok: false, error: `routine '${id}' не найдена` }, 404);
+      }
+      const result = launchd.applyRoutineSchedule(routine, { repoRoot: process.cwd() });
+      const nextRunAt = computeNextRunAt(routine.trigger);
+      return c.json({ ok: true, ...result, ...(nextRunAt !== undefined ? { nextRunAt } : {}) });
+    } catch (err) {
+      console.error('[POST /routines/:id/schedule/apply]', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      const hint =
+        msg.includes('Cannot find module') || msg.includes('ERR_MODULE_NOT_FOUND')
+          ? '. Запусти `pnpm exec tsc` чтобы появился dist/src/routines/launchd.js'
           : '';
       return c.json({ ok: false, error: `${msg}${hint}` }, 500);
     }

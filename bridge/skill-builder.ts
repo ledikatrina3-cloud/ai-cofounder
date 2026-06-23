@@ -30,7 +30,7 @@
 //   * Системный промпт ясно говорит «не используй секреты, не публикуй
 //     креды» — но это secondary, основная защита — schema-валидация.
 
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -307,4 +307,104 @@ export async function saveNewSkill(
   }
 
   return { name: req.name, filePath: skillDir };
+}
+
+// ---------------------------------------------------------------------------
+// updateSkill / deleteSkill / readSkillRaw (Ф5 — редактирование скиллов из UI).
+// ---------------------------------------------------------------------------
+
+function resolveSkillDir(name: string, deps: SaveSkillDeps): string {
+  if (!KEBAB_CASE_RE.test(name)) {
+    throw new Error(`поле 'name'='${name}' должно быть kebab-case.`);
+  }
+  const skillsRoot = deps.skillsRoot ?? resolve(process.cwd(), SKILLS_DIR_NAME);
+  const skillDir = resolve(skillsRoot, name);
+  if (skillDir !== `${skillsRoot}/${name}` && !skillDir.startsWith(`${skillsRoot}/`)) {
+    throw new Error(`имя '${name}' резолвится за пределы skills/ — отказ.`);
+  }
+  return skillDir;
+}
+
+/** Перезапись существующего скилла (в отличие от saveNewSkill — требует существования). */
+export async function updateSkill(
+  req: SaveSkillRequest,
+  deps: SaveSkillDeps = {},
+): Promise<SaveSkillResult> {
+  const skillDir = resolveSkillDir(req.name, deps);
+
+  // Требуем, чтобы скилл уже существовал (update, не create).
+  try {
+    await stat(skillDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`скилл '${req.name}' не найден. Для создания используй POST /skills.`);
+    }
+    throw err;
+  }
+
+  if (req.skillMd.trim() === '') throw new Error('SKILL.md не должен быть пустым.');
+  const parseSkillSources = deps.parseSkillSources ?? (await loadParser()).parseSkillSources;
+  try {
+    const parsed = parseSkillSources(
+      skillDir,
+      req.skillMd,
+      req.permissionsMd.trim() === '' ? null : req.permissionsMd,
+    );
+    if (parsed.name !== req.name) {
+      throw new Error(`frontmatter 'name'='${parsed.name}' не совпадает с '${req.name}'.`);
+    }
+  } catch (err) {
+    throw new Error((err as Error).message);
+  }
+
+  await writeFile(resolve(skillDir, 'SKILL.md'), req.skillMd, 'utf8');
+  const permPath = resolve(skillDir, 'permissions.md');
+  if (req.permissionsMd.trim() !== '') {
+    await writeFile(permPath, req.permissionsMd, 'utf8');
+  } else {
+    // Пустой permissions → убираем файл (скилл вернётся к дефолтным ограничениям).
+    await rm(permPath, { force: true });
+  }
+  return { name: req.name, filePath: skillDir };
+}
+
+export async function deleteSkill(
+  name: string,
+  deps: SaveSkillDeps = {},
+): Promise<{ name: string }> {
+  const skillDir = resolveSkillDir(name, deps);
+  try {
+    await stat(skillDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`скилл '${name}' не найден.`);
+    }
+    throw err;
+  }
+  await rm(skillDir, { recursive: true, force: true });
+  return { name };
+}
+
+/** Сырой SKILL.md + permissions.md (для prefill edit-режима в UI). */
+export async function readSkillRaw(
+  name: string,
+  deps: SaveSkillDeps = {},
+): Promise<{ name: string; skillMd: string; permissionsMd: string }> {
+  const skillDir = resolveSkillDir(name, deps);
+  let skillMd: string;
+  try {
+    skillMd = await readFile(resolve(skillDir, 'SKILL.md'), 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`скилл '${name}' не найден.`);
+    }
+    throw err;
+  }
+  let permissionsMd = '';
+  try {
+    permissionsMd = await readFile(resolve(skillDir, 'permissions.md'), 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  return { name, skillMd, permissionsMd };
 }

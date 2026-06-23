@@ -58,6 +58,10 @@ interface SkillsResponse {
 interface RoutineDetailDrawerProps {
   routineId: string | null;
   onClose: () => void;
+  /** Открыть редактор этого агента (Ф2). */
+  onEdit?: (id: string) => void;
+  /** Агент удалён через DELETE — родитель закрывает drawer и рефрешит офис. */
+  onDeleted?: (id: string) => void;
 }
 
 const BRIDGE_URL = 'http://127.0.0.1:3737';
@@ -331,7 +335,7 @@ function formatNextRunAt(nextRunAt: number, now: number = Date.now()): string {
   let dayLabel: string;
   if (target.toDateString() === today.toDateString()) dayLabel = 'сегодня';
   else if (target.toDateString() === tomorrow.toDateString()) dayLabel = 'завтра';
-  else dayLabel = target.toLocaleDateString(undefined, { day: '2-digit', month: 'long' });
+  else dayLabel = target.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long' });
   const timeLabel = `${pad2(target.getHours())}:${pad2(target.getMinutes())}`;
   const diffMs = nextRunAt - now;
   let rel: string;
@@ -349,7 +353,12 @@ function formatNextRunAt(nextRunAt: number, now: number = Date.now()): string {
   return `следующий — ${dayLabel} в ${timeLabel} (${rel})`;
 }
 
-export function RoutineDetailDrawer({ routineId, onClose }: RoutineDetailDrawerProps): ReactNode {
+export function RoutineDetailDrawer({
+  routineId,
+  onClose,
+  onEdit,
+  onDeleted,
+}: RoutineDetailDrawerProps): ReactNode {
   const [data, setData] = useState<DetailResponse | null>(null);
   const [skills, setSkills] = useState<SkillBadge[]>([]);
   const [loading, setLoading] = useState(false);
@@ -478,6 +487,8 @@ export function RoutineDetailDrawer({ routineId, onClose }: RoutineDetailDrawerP
             onSelectRun={setSelectedRunId}
             promptExpanded={promptExpanded}
             setPromptExpanded={setPromptExpanded}
+            onEdit={onEdit}
+            onDeleted={onDeleted}
           />
         )}
       </div>
@@ -495,6 +506,8 @@ interface DrawerBodyProps {
   onSelectRun: (triggerId: string) => void;
   promptExpanded: boolean;
   setPromptExpanded: (v: boolean) => void;
+  onEdit?: (id: string) => void;
+  onDeleted?: (id: string) => void;
 }
 
 function DrawerBody(props: DrawerBodyProps): ReactNode {
@@ -508,6 +521,8 @@ function DrawerBody(props: DrawerBodyProps): ReactNode {
     onSelectRun,
     promptExpanded,
     setPromptExpanded,
+    onEdit,
+    onDeleted,
   } = props;
 
   if (loading) {
@@ -858,8 +873,178 @@ function DrawerBody(props: DrawerBodyProps): ReactNode {
             Backend сразу 202, runRoutine крутится в фоне — UI ловит routine.start/end
             через SSE → human-figure в OfficeScene оживает. */}
         <RunNowButton routineId={routine.id} />
+
+        <ScheduleApplyButton routineId={routine.id} trigger={routine.trigger} />
+
+        {(onEdit !== undefined || onDeleted !== undefined) && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            {onEdit !== undefined && (
+              <button
+                type="button"
+                onClick={() => onEdit(routine.id)}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  fontFamily: 'JetBrains Mono, Menlo, monospace',
+                  fontSize: 12,
+                  color: '#d97757',
+                  background: 'transparent',
+                  border: '1px solid rgba(217,119,87,0.5)',
+                  borderRadius: 3,
+                  cursor: 'pointer',
+                }}
+              >
+                ✎ Редактировать
+              </button>
+            )}
+            {onDeleted !== undefined && (
+              <DeleteButton routineId={routine.id} onDeleted={onDeleted} />
+            )}
+          </div>
+        )}
       </div>
     </>
+  );
+}
+
+// Применение расписания к launchd (Ф3). Двухшаговое подтверждение, т.к. это
+// мутирует живой планировщик мака.
+function ScheduleApplyButton({
+  routineId,
+  trigger,
+}: {
+  routineId: string;
+  trigger: string;
+}): ReactNode {
+  const [confirming, setConfirming] = useState(false);
+  const [state, setState] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const handle = useCallback(async (): Promise<void> => {
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    setConfirming(false);
+    setState('busy');
+    setMsg(null);
+    try {
+      const res = await fetch(
+        `${BRIDGE_URL}/routines/${encodeURIComponent(routineId)}/schedule/apply`,
+        { method: 'POST', headers: { 'content-type': 'application/json' } },
+      );
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        action?: string;
+        reason?: string;
+        error?: string;
+      } | null;
+      if (!res.ok || body?.ok === false) {
+        setMsg(body?.error ?? `HTTP ${res.status}`);
+        setState('err');
+        return;
+      }
+      setMsg(body?.reason ?? body?.action ?? 'применено');
+      setState('ok');
+      setTimeout(() => setState('idle'), 5000);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+      setState('err');
+    }
+  }, [confirming, routineId]);
+
+  const isCron = trigger !== 'manual';
+  const label =
+    state === 'busy'
+      ? '⏳ применяю…'
+      : confirming
+        ? isCron
+          ? '✓ Загрузить в launchd?'
+          : '✓ Снять с launchd?'
+        : '⏰ Применить расписание';
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        type="button"
+        onClick={handle}
+        disabled={state === 'busy'}
+        style={{
+          width: '100%',
+          padding: '8px 12px',
+          fontFamily: 'JetBrains Mono, Menlo, monospace',
+          fontSize: 12,
+          color: state === 'err' ? '#b25555' : '#c4a747',
+          background: confirming ? 'rgba(196,167,71,0.15)' : 'transparent',
+          border: '1px solid rgba(196,167,71,0.45)',
+          borderRadius: 3,
+          cursor: state === 'busy' ? 'wait' : 'pointer',
+        }}
+      >
+        {label}
+      </button>
+      {msg !== null && (
+        <div
+          style={{
+            marginTop: 6,
+            fontSize: 10,
+            color: state === 'err' ? '#b25555' : '#9ca77c',
+            opacity: 0.9,
+            fontFamily: 'JetBrains Mono, Menlo, monospace',
+          }}
+        >
+          {state === 'ok' ? '✓ ' : ''}
+          {msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeleteButton({
+  routineId,
+  onDeleted,
+}: {
+  routineId: string;
+  onDeleted: (id: string) => void;
+}): ReactNode {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const handle = useCallback(async (): Promise<void> => {
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`${BRIDGE_URL}/routines/${encodeURIComponent(routineId)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) onDeleted(routineId);
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  }, [confirming, routineId, onDeleted]);
+  return (
+    <button
+      type="button"
+      onClick={handle}
+      disabled={busy}
+      style={{
+        flex: confirming ? 1 : undefined,
+        padding: '8px 12px',
+        fontFamily: 'JetBrains Mono, Menlo, monospace',
+        fontSize: 12,
+        color: '#b25555',
+        background: confirming ? 'rgba(178,85,85,0.15)' : 'transparent',
+        border: '1px solid rgba(178,85,85,0.5)',
+        borderRadius: 3,
+        cursor: busy ? 'wait' : 'pointer',
+      }}
+    >
+      {busy ? 'удаляю…' : confirming ? '✓ Точно удалить?' : '🗑 Удалить'}
+    </button>
   );
 }
 

@@ -21,7 +21,7 @@ interface NavItem {
 
 const ITEMS: NavItem[] = [
   { view: 'office', icon: '🏢', label: 'Офис' },
-  { view: 'teams', icon: '👥', label: 'Команды', disabledHint: 'Раздел появится в Фазе 5' },
+  { view: 'teams', icon: '👥', label: 'Команды' },
   { view: 'skills', icon: '🎯', label: 'Скиллы' },
   { view: 'metrics', icon: '📊', label: 'Метрики' },
 ];

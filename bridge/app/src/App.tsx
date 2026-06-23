@@ -1,6 +1,6 @@
 // AI-Cofounder Bridge — главное полотно.
 //
-// С 2026-05-17 (plans/) дефолтный режим:
+// С 2026-05-17 (plans/2026-05-17-agent-office-ui.md) дефолтный режим:
 // 3D-офис AI-сотрудников. Header сверху, OfficeLivePreview под ним на всё
 // оставшееся пространство, RoutineDetailDrawer slide-out по клику на worker'а.
 //
@@ -22,6 +22,7 @@ import { Marketplace } from './components/Marketplace/index.js';
 import { Metrics } from './components/Metrics/index.js';
 import { OfficeLivePreview } from './components/Office/OfficeLivePreview.js';
 import { Sidebar, type SidebarView } from './components/Sidebar/Sidebar.js';
+import { Teams } from './components/Teams/index.js';
 import { Terminal } from './components/Terminal/index.js';
 import { useAgentStatus } from './hooks/useAgentStatus.js';
 import { useBridgeEvents } from './hooks/useBridgeEvents.js';
@@ -80,37 +81,12 @@ function MainView({ view }: { view: SidebarView }): ReactNode {
     case 'skills':
       return <Marketplace />;
     case 'teams':
-      return <StubView title="Команды" hint="Раздел появится в Фазе 5 (departments + pipeline)." />;
+      return <Teams />;
     case 'metrics':
       return <Metrics />;
     default:
       return null;
   }
-}
-
-function StubView({ title, hint }: { title: string; hint: string }): ReactNode {
-  return (
-    <div
-      style={{
-        width: '100%',
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 16,
-        background: '#0a0a0a',
-        color: '#e9e3dc',
-        fontFamily: "'JetBrains Mono', 'Fira Mono', monospace",
-        textAlign: 'center',
-        padding: 32,
-      }}
-    >
-      <div style={{ fontSize: 56, opacity: 0.4 }}>◇</div>
-      <div style={{ fontSize: 18, color: '#d97757' }}>{title}</div>
-      <div style={{ fontSize: 12, opacity: 0.6, maxWidth: 360, lineHeight: 1.6 }}>{hint}</div>
-    </div>
-  );
 }
 
 function LegacyLayout({

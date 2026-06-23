@@ -40,6 +40,8 @@ export interface RoutineSummary {
 export interface UseRoutinesOptions {
   /** Если задано — оставить только routines с этим departmentId. */
   departmentId?: string;
+  /** Меняется извне (после create/edit/delete) — форсит немедленный re-fetch. */
+  refreshKey?: number;
 }
 
 export interface UseRoutinesResult {
@@ -78,12 +80,13 @@ function toWorkerData(s: RoutineSummary): WorkerData {
 }
 
 export function useRoutines(options: UseRoutinesOptions = {}): UseRoutinesResult {
-  const { departmentId } = options;
+  const { departmentId, refreshKey } = options;
   const [workers, setWorkers] = useState<WorkerData[]>([]);
   const [summaries, setSummaries] = useState<RoutineSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey — trigger-only, внутри эффекта не читается, но его смена обязана форсить немедленный re-fetch
   useEffect(() => {
     let cancelled = false;
 
@@ -126,7 +129,7 @@ export function useRoutines(options: UseRoutinesOptions = {}): UseRoutinesResult
       cancelled = true;
       clearInterval(interval);
     };
-  }, [departmentId]);
+  }, [departmentId, refreshKey]);
 
   return { workers, summaries, loading, error };
 }

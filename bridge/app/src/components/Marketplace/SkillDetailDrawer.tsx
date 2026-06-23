@@ -12,8 +12,10 @@
 //   * usedBy: routine-id'ы как чипы (read-only, без навигации в Worker
 //     drawer — это будет отдельная фича).
 
-import type { ReactNode } from 'react';
-import { useEffect } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+
+const SKILL_BRIDGE_URL = 'http://127.0.0.1:3737';
 import { type SkillHealthInfo, formatTimeAgo } from '../../hooks/useSkillHealth.js';
 import { useSkillDetail } from '../../hooks/useSkills.js';
 
@@ -25,6 +27,12 @@ interface SkillDetailDrawerProps {
   onSwitchSkill: (name: string) => void;
   /** Запись health-store или undefined если не было прогона. */
   health?: SkillHealthInfo;
+  /** Открыть редактор этого скилла (Ф5). */
+  onEdit?: (name: string) => void;
+  /** Скилл удалён — родитель закрывает drawer и рефрешит список. */
+  onDeleted?: (name: string) => void;
+  /** Бамп инвалидирует кэш useSkillDetail после edit (ревью finding #11). */
+  refreshKey?: number;
 }
 
 const DEFAULT_ACCENT = '#d97757';
@@ -34,8 +42,11 @@ export function SkillDetailDrawer({
   onClose,
   onSwitchSkill,
   health,
+  onEdit,
+  onDeleted,
+  refreshKey,
 }: SkillDetailDrawerProps): ReactNode {
-  const { skill, loading, error } = useSkillDetail(skillName);
+  const { skill, loading, error } = useSkillDetail(skillName, refreshKey);
 
   // Escape закрывает.
   useEffect(() => {
@@ -98,6 +109,8 @@ export function SkillDetailDrawer({
             onClose={onClose}
             onSwitchSkill={onSwitchSkill}
             health={health}
+            onEdit={onEdit}
+            onDeleted={onDeleted}
           />
         )}
       </div>
@@ -140,11 +153,15 @@ function DrawerBody({
   onClose,
   onSwitchSkill,
   health,
+  onEdit,
+  onDeleted,
 }: {
   skill: NonNullable<ReturnType<typeof useSkillDetail>['skill']>;
   onClose: () => void;
   onSwitchSkill: (name: string) => void;
   health?: SkillHealthInfo;
+  onEdit?: (name: string) => void;
+  onDeleted?: (name: string) => void;
 }): ReactNode {
   const accent = skill.color ?? DEFAULT_ACCENT;
   const title = skill.displayName ?? skill.name;
@@ -185,7 +202,22 @@ function DrawerBody({
             {skill.category !== undefined && ` · ${skill.category}`}
           </div>
         </div>
-        <CloseButton onClose={onClose} />
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {onEdit !== undefined && (
+            <button
+              type="button"
+              onClick={() => onEdit(skill.name)}
+              title="Редактировать"
+              style={headerActionStyle(accent)}
+            >
+              ✎
+            </button>
+          )}
+          {onDeleted !== undefined && (
+            <DeleteSkillButton skillName={skill.name} onDeleted={onDeleted} />
+          )}
+          <CloseButton onClose={onClose} />
+        </div>
       </div>
 
       {/* Scrollable body */}
@@ -345,6 +377,70 @@ function CloseButton({ onClose }: { onClose: () => void }): ReactNode {
       }}
     >
       ✕
+    </button>
+  );
+}
+
+function headerActionStyle(accent: string): CSSProperties {
+  return {
+    background: 'transparent',
+    border: `1px solid ${accent}40`,
+    color: accent,
+    padding: '4px 9px',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 13,
+    cursor: 'pointer',
+    borderRadius: 3,
+    flexShrink: 0,
+  };
+}
+
+// Удаление скилла (Ф5) — двухшаговое подтверждение.
+function DeleteSkillButton({
+  skillName,
+  onDeleted,
+}: {
+  skillName: string;
+  onDeleted: (name: string) => void;
+}): ReactNode {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const handle = useCallback(async (): Promise<void> => {
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`${SKILL_BRIDGE_URL}/skills/${encodeURIComponent(skillName)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) onDeleted(skillName);
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  }, [confirming, skillName, onDeleted]);
+  return (
+    <button
+      type="button"
+      onClick={handle}
+      disabled={busy}
+      title="Удалить скилл"
+      style={{
+        background: confirming ? 'rgba(178,85,85,0.15)' : 'transparent',
+        border: '1px solid rgba(178,85,85,0.45)',
+        color: '#b25555',
+        padding: '4px 9px',
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 13,
+        cursor: busy ? 'wait' : 'pointer',
+        borderRadius: 3,
+        flexShrink: 0,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {busy ? '…' : confirming ? '✓ точно?' : '🗑'}
     </button>
   );
 }

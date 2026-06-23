@@ -1,8 +1,7 @@
 // Shared types for the Office scene.
 //
-// Wave 1B сцена работает на mock-данных (см. mock-workers.ts). В Wave 2/3
-// backend (agent A) добавит реальный hook, который маппит RoutineSummary →
-// WorkerData. Пока контракт прост: id + role + цвет + статус.
+// Сцена работает на live-данных: useRoutines маппит RoutineSummary → WorkerData
+// (id + role + цвет + статус), live-оверлеи — из SSE-событий bridge.
 
 export type WorkerStatus = 'idle' | 'running' | 'failed' | 'finished';
 
@@ -100,7 +99,7 @@ export interface WorkerData {
   /**
    * Процент выполнения текущего workflow (0..100). Вычисляется из text-events
    * (assistant.thinking/message) regex'ом «Этап N» через useRoutineProgress.
-   * Для skill build-guide это 14 крупных этапов. undefined пока
+   * Для skill article-writing это 14 крупных этапов. undefined пока
    * status≠'running'. После routine.end status='ok' = 100%.
    */
   progressPercent?: number;
