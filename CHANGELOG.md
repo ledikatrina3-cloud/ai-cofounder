@@ -3,6 +3,26 @@
 All notable changes to AI-Cofounder are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses semantic versioning.
 
+## [1.1.0] - 2026-06-24
+
+### Added
+- **Browser control panel** - full CRUD for agents, departments and skills directly
+  in the bridge 3D-office, so a self-hosted user can author and run autonomous agents
+  from the browser without editing files by hand.
+  - `agents/<id>/` authoring: serializer + write module (create/edit/delete), routed
+    via `POST`/`PATCH`/`DELETE /routines`. Self-contained agents attach to the
+    built-in `self` project and need no `config/projects.md`.
+  - Departments and skills CRUD (write modules + editor UI).
+  - launchd schedule apply from the UI (macOS) with explicit confirmation.
+  - `RoutineEditor` / `Teams` / `SkillEditor` components; office Create button,
+    department selector, and drawers with Run/Edit/Delete/Schedule.
+
+### Security
+- `parser`: kebab-case id validation (`ROUTINE_ID_RE`) as an XML-injection guard.
+
+### Tests
+- Serializer round-trip, write-path, and agent-authoring tests.
+
 ## [1.0.0] - 2026-06-04
 
 First open-source release. A local-first, proactive AI co-founder framework with a
