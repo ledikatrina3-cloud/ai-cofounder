@@ -198,6 +198,8 @@ describe('runSubagentViaCodex', () => {
       '--json',
       '--ephemeral',
       '--skip-git-repo-check',
+      '--sandbox',
+      'workspace-write',
       '-C',
       opts.cwd,
       '-m',

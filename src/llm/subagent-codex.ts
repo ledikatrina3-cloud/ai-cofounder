@@ -62,6 +62,8 @@ export async function runSubagentViaCodex(
     '--json',
     '--ephemeral',
     '--skip-git-repo-check',
+    '--sandbox',
+    'workspace-write',
     '-C',
     opts.cwd,
     ...(transport.codexModel !== undefined ? ['-m', transport.codexModel] : []),
