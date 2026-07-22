@@ -1,0 +1,153 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# iCloud / Finder name-conflict duplicates (e.g. "file 2.ts", "dir 2/")
+* 2.ts
+* 2.tsx
+* 2.cjs
+* 2.js
+* 2.md
+* 2.json
+* 2.yml
+* 2.yaml
+* 2.sql
+* 2.sh
+* 2.go
+* 2.css
+* 2.plist
+* 2.bak
+* 2.html
+* 2.png
+* 2.svg
+* 2/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# ── Пользовательский слой (engine/user split, OSS v1.0) ──────────────────────
+# Движок (upstream) НЕ поставляет файлов сюда — git pull движка их не трогает.
+# /setup материализует локально из examples/ (org-seed, ai-clone-seed, agents/)
+# и из config/*.example.md. Граница: engine-manifest.json + docs/UPDATING.md.
+/agents/
+/routines/
+/org/
+/ai-clone/
+/content/
+/projects/
+# Приватное планирование/стратегия/знания фаундера - НЕ публикуем.
+# Движок поставляет в этих папках только README/примеры (они tracked);
+# реальные файлы форка - user-layer, materialize локально, в git движка не идут.
+/idea/
+/plans/
+/retrospectives/
+/architecture/
+# Приватный overlay git-dir: форк версионирует свой user-layer отдельным репо
+# (один work-tree, два git-dir). Движок его никогда не трекает. См. docs/UPDATING.md.
+/.private.git/
+# Локальный анти-leak блок-лист (личные имя/бренд/токены мейнтейнера). НЕ публикуется:
+# tests/anti-leak.test.ts подхватывает его локально, публичный движок шипит только
+# generic key-паттерны. Форк кладёт свой файл. См. tests/anti-leak.test.ts.
+/anti-leak.tokens.local.json
+# Пользовательские config-файлы (engine-tuning config/*.md остаются в трекинге).
+config/projects.md
+config/allowlist.md
+config/budget.md
+config/support-source.md
+# State раннера миграций пользовательского слоя.
+.ai-cofounder-migrate-state
+
+# SQLite (Prisma dev DB + journal/wal)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.npm
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+.vercel
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Vite (bridge UI)
+bridge/app/dist/
+bridge/app/.vite/
+
+# Coverage / tests
+coverage/
+.nyc_output/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+*.egg-info/
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+.coverage
+.coverage.*
+htmlcov/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Pipeline outputs (артефакты pipeline executor — Фаза 5).
+# Файлы создаются автоматически нодами executor'а: research/<date>.md,
+# outlines/<date>.md, seo-audits/<date>.json и т.п. В git их не храним —
+# это runtime-данные. Шаблон директории `.gitkeep` оставляем.
+outputs/
+!outputs/.gitkeep
+
+# Playwright MCP session artifacts (console logs + page snapshots)
+.playwright-mcp/
+
+# Generated screenshots/screenshots from playwright в корне репо
+/layout*.png
+/marketplace*.png
+/nav-*.png
+/seo-*.png

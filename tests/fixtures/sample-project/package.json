@@ -1,0 +1,7 @@
+{
+  "name": "sample-project",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fixture for AI-Cofounder phase 2.3a tests",
+  "type": "module"
+}

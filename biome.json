@@ -1,0 +1,102 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignore": [
+      "node_modules",
+      "dist",
+      "prisma/migrations",
+      "extensions/**",
+      "**/*.md",
+      ".env",
+      ".env.*",
+      "**/* 2.ts",
+      "**/* 2.tsx",
+      "**/* 2.cjs",
+      "**/* 2.js"
+    ]
+  },
+  "organizeImports": { "enabled": true },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "noNonNullAssertion": "off"
+      },
+      "nursery": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@anthropic-ai/sdk": "Импорт `@anthropic-ai/sdk` разрешён только в `src/llm/**`. Используй `call(...)` из `src/llm/call.ts` — иначе вызов уйдёт в обход cost-meter.",
+              "@anthropic-ai/claude-agent-sdk": "Импорт `@anthropic-ai/claude-agent-sdk` разрешён только в `src/llm/**`. Используй `runSubagent(...)` из `src/llm/subagent.ts` — иначе sub-agent уйдёт в обход cost-meter."
+            }
+          }
+        }
+      },
+      "suspicious": {
+        "noExplicitAny": "warn",
+        "noArrayIndexKey": "warn"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "include": ["src/llm/**"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    },
+    {
+      "include": ["src/telegram/**"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noProcessEnv": "error"
+          }
+        }
+      }
+    },
+    {
+      "include": [
+        "src/pipelines/**",
+        "tests/pipeline-parser.test.ts",
+        "tests/pipelines-executor.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noThenProperty": "off"
+          }
+        }
+      }
+    }
+  ],
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  }
+}

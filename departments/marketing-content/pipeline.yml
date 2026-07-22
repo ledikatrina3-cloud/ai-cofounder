@@ -1,0 +1,44 @@
+# SEO Department pipeline — упрощённый.
+#
+# Каждый из 6 платформенных писателей работает независимо. Когда фаундер
+# заполнит промты — каждая нода будет писать и публиковать в свою площадку
+# с нуля. Master draft / шаринг draft'ов между нодами добавим позже,
+# когда станет ясна структура промтов.
+
+nodes:
+  - id: example-project
+    employee: marketing-content-example-project
+    output: content/drafts/example-project/${date}.md
+    onFail: { retries: 1, then: continue }
+
+  - id: vc
+    employee: marketing-content-vc
+    output: content/drafts/vc/${date}.md
+    onFail: { retries: 1, then: continue }
+
+  - id: dzen
+    employee: marketing-content-dzen
+    output: content/drafts/dzen/${date}.md
+    onFail: { retries: 1, then: continue }
+
+  - id: habr
+    employee: marketing-content-habr
+    output: content/drafts/habr/${date}.md
+    onFail: { retries: 1, then: continue }
+
+  - id: reddit
+    employee: marketing-content-reddit
+    output: content/drafts/reddit/${date}.md
+    onFail: { retries: 1, then: continue }
+
+  - id: linkedin
+    employee: marketing-content-linkedin
+    output: content/drafts/linkedin/${date}.md
+    onFail: { retries: 1, then: continue }
+
+  - id: approve-publish
+    type: human-gate
+    via: telegram
+    timeout: 12h
+    onTimeout: halt
+    inputs: [example-project, vc, dzen, habr, reddit, linkedin]

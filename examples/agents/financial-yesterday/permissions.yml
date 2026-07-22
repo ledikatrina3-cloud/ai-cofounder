@@ -1,0 +1,3 @@
+tools:
+  - project.db.query
+  - report.send

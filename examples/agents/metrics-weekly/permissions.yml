@@ -1,0 +1,4 @@
+tools:
+  - project.db.query
+  - journal.search
+  - report.send

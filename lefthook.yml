@@ -1,0 +1,10 @@
+pre-commit:
+  parallel: false
+  commands:
+    biome:
+      glob: '*.{ts,tsx,js,jsx,json,jsonc}'
+      run: pnpm biome check --no-errors-on-unmatched {staged_files}
+    build:
+      run: pnpm build
+    invariants:
+      run: pnpm test:invariants

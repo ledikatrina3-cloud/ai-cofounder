@@ -1,0 +1,22 @@
+# Инструменты агента. Имена обязаны существовать в src/routines/tool-registry.ts.
+# Маппинг в SDK builtins:
+#   project.read  -> Read   (читать org/, ai-clone/, источник тем, свои черновики)
+#   project.grep  -> Grep   (финальный gate: grep незакрытых пунктов чек-листа)
+#   project.glob  -> Glob   (найти уже существующие content/<slug>.* перед записью)
+#   project.bash  -> Bash   (запуск скриптов скиллов: word-count, seo-audit,
+#                            research-serp, cover-design generate -> пишут файлы
+#                            в ./content/; запись артефактов идёт через эти скрипты,
+#                            отдельного write-tool в registry нет)
+#   report.send   -> отчёт о готовой статье (output: both -> Telegram + лог)
+tools:
+  - project.read
+  - project.grep
+  - project.glob
+  - project.bash
+  - report.send
+
+# Самодостаточный дефолт: пишет в ./content/, сети и секретов не требует.
+secrets: []
+
+# Примечание: dbScopes и budget в v1.0 декларативны (документируют намерение,
+# рантаймом ещё не энфорсятся). Этому агенту БД не нужна - dbScopes не заданы.

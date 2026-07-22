@@ -1,0 +1,28 @@
+# Capability surface агента. ОТСУТСТВИЕ этого файла = ноль tools (silence = safe).
+# Реальные имена tools — см. src/routines/tool-registry.ts.
+#
+# Что энфорсится в v1.0:
+#   tools[]   — агенту доступны ТОЛЬКО перечисленные tools (canUseTool это проверяет).
+#   bash[]    — расширяет DEFAULT_WHITELIST префиксами; FORBIDDEN_SUBSTRINGS всё равно запрещены.
+#   secrets[] — Keychain-ключи, которые агент вправе читать; при cross-project syncEnv
+#               синкаются ТОЛЬКО эти ключи (нельзя утечь незаявленный секрет).
+#
+# Декларативно в v1.0 (парсится, документирует намерение; полный энфорс — v1.1):
+#   dbScopes, budget, telegram, maxStepsPerRun.
+
+tools:
+  - report.send
+
+# bash:
+#   - git log
+#   - git diff
+
+# secrets:
+#   - MY_API_KEY
+
+# dbScopes:
+#   read: []
+#   write: []
+
+# budget:
+#   perRunUsd: 0.25

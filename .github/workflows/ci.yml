@@ -1,0 +1,42 @@
+name: CI
+
+# Гейт инварианта §2.6 «каждый шаг проверяем»: на каждый push в main и каждый PR
+# гоняем те же команды, что и локальный gate (CONTRIBUTING.md §2): build + test.
+# Красный build или красный тест блокирует мерж.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: file:./dev.db
+    steps:
+      - uses: actions/checkout@v4
+
+      # keytar (Telegram-секреты) собирается из исходников и требует libsecret на Linux.
+      - name: Install libsecret (keytar native dep)
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
+
+      - name: Enable corepack (pnpm из packageManager)
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: DB migrate (prisma deploy + sqlite-vec init)
+        run: pnpm db:migrate
+
+      - name: Build (biome + tsc root/bridge/app + vite)
+        run: pnpm build
+
+      - name: Test (full vitest suite)
+        run: pnpm test

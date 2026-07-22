@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>vc.ru Publisher</title>
+    <style>
+      body { font-family: system-ui, sans-serif; width: 320px; padding: 12px; margin: 0; }
+      h1 { margin: 0 0 8px 0; font-size: 14px; }
+      .row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+      button { padding: 6px 10px; font-size: 13px; border-radius: 4px; border: 1px solid #ccc; background: #f7f7f7; cursor: pointer; }
+      button:hover { background: #eee; }
+      button.primary { background: #2563eb; color: white; border-color: #1d4ed8; }
+      button.primary:hover { background: #1d4ed8; }
+      .status { font-size: 12px; color: #666; min-height: 16px; margin-top: 8px; word-break: break-all; }
+      .ok { color: #16a34a; }
+      .err { color: #dc2626; }
+      label { font-size: 13px; }
+      input[type=checkbox] { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <h1>vc.ru Publisher (Acme Academy)</h1>
+    <div class="row">
+      <input type="checkbox" id="pollToggle" />
+      <label for="pollToggle">Авто-polling bridge каждые 30 сек</label>
+    </div>
+    <div class="row">
+      <button id="manualPublish" class="primary">Опубликовать следующее</button>
+    </div>
+    <div class="row">
+      <button id="testBridge">Проверить bridge</button>
+      <button id="openEditor">Открыть vc.ru/editor</button>
+    </div>
+    <div class="status" id="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>
