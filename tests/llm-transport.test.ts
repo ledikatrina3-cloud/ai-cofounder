@@ -22,6 +22,8 @@ const ENV_KEYS = [
   'CLAUDE_CLI_PATH',
   'CODEX_CLI_PATH',
   'CODEX_MODEL',
+  'CODEX_SANDBOX_NETWORK_ACCESS',
+  'CODEX_NETWORK_ACCESS',
   'ANTHROPIC_API_KEY',
 ];
 
@@ -93,6 +95,14 @@ describe('transport — config', () => {
     expect(t.codexModel).toBe('gpt-5-codex');
     expect(t.apiKey).toBe('sk-dummy-codex-route');
     expect(isOauthMode()).toBe(false);
+  });
+
+  it('codex network access flag enables sandbox network', () => {
+    process.env.LLM_TRANSPORT = 'codex';
+    process.env.CODEX_SANDBOX_NETWORK_ACCESS = 'true';
+    const t = getTransport();
+    expect(t.mode).toBe('codex');
+    expect(t.codexNetworkAccess).toBe(true);
   });
 
   it('LLM_TRANSPORT=apikey с ANTHROPIC_API_KEY → apikey config', () => {

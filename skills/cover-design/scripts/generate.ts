@@ -216,7 +216,6 @@ export async function generateCover(opts: GenerateOptions): Promise<Output> {
 async function defaultSharpConvert(svg: string): Promise<Buffer | null> {
   try {
     // Динамический импорт — не падаем если sharp не установлен.
-    // @ts-expect-error optional dependency, может отсутствовать
     const sharpModule = await import('sharp');
     const sharp = sharpModule.default ?? sharpModule;
     const buf = await sharp(Buffer.from(svg)).resize(1200, 630, { fit: 'cover' }).png().toBuffer();

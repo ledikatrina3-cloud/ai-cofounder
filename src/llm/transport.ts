@@ -36,6 +36,7 @@ export interface TransportConfig {
   claudeCliPath?: string; // oauth: path to 'claude'
   codexCliPath?: string; // codex: path to 'codex'
   codexModel?: string; // codex: optional model override for `codex exec -m`
+  codexNetworkAccess?: boolean; // codex: opt-in network access for workspace-write sandbox
 }
 
 export class TransportConfigError extends Error {
@@ -88,11 +89,14 @@ export function getTransport(): TransportConfig {
   if (mode === 'codex') {
     const codexCliPath = nonEmptyEnv('CODEX_CLI_PATH') ?? defaultCodexCliPath();
     const codexModel = nonEmptyEnv('CODEX_MODEL');
+    const codexNetworkAccess =
+      boolEnv('CODEX_SANDBOX_NETWORK_ACCESS') ?? boolEnv('CODEX_NETWORK_ACCESS') ?? false;
     cached = {
       mode,
       apiKey: CODEX_DUMMY_KEY,
       codexCliPath,
       ...(codexModel !== undefined ? { codexModel } : {}),
+      ...(codexNetworkAccess ? { codexNetworkAccess } : {}),
     };
     return cached;
   }
@@ -161,6 +165,17 @@ function nonEmptyEnv(key: string): string | undefined {
   if (value === undefined) return undefined;
   const trimmed = value.trim();
   return trimmed === '' ? undefined : trimmed;
+}
+
+function boolEnv(key: string): boolean | undefined {
+  const value = nonEmptyEnv(key);
+  if (value === undefined) return undefined;
+  const normalized = value.toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  throw new TransportConfigError(
+    `${key}="${value}" is invalid. Use true/false, 1/0, yes/no, or on/off.`,
+  );
 }
 
 function defaultCodexCliPath(): string {

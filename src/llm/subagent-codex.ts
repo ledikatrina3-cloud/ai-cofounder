@@ -62,6 +62,9 @@ export async function runSubagentViaCodex(
     '--json',
     '--ephemeral',
     '--skip-git-repo-check',
+    ...(transport.codexNetworkAccess === true
+      ? ['-c', 'sandbox_workspace_write.network_access=true']
+      : []),
     '--sandbox',
     'workspace-write',
     '-C',

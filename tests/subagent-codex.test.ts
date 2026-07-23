@@ -144,10 +144,14 @@ describe('runSubagentViaCodex', () => {
       LLM_TRANSPORT: process.env.LLM_TRANSPORT,
       CODEX_CLI_PATH: process.env.CODEX_CLI_PATH,
       CODEX_MODEL: process.env.CODEX_MODEL,
+      CODEX_SANDBOX_NETWORK_ACCESS: process.env.CODEX_SANDBOX_NETWORK_ACCESS,
+      CODEX_NETWORK_ACCESS: process.env.CODEX_NETWORK_ACCESS,
     };
     process.env.LLM_TRANSPORT = 'codex';
     process.env.CODEX_CLI_PATH = '/usr/local/bin/codex-test';
     process.env.CODEX_MODEL = 'gpt-5-codex';
+    process.env.CODEX_SANDBOX_NETWORK_ACCESS = 'false';
+    unsetEnv('CODEX_NETWORK_ACCESS');
     resetTransportForTests();
   });
 
@@ -230,6 +234,45 @@ describe('runSubagentViaCodex', () => {
     expect(props.cacheReadTokens).toBe(40);
     expect(props.cacheCreationTokens).toBe(5);
     expect(props.outputTokens).toBe(9);
+  });
+
+  it('passes network access config to codex exec when enabled', async () => {
+    process.env.CODEX_SANDBOX_NETWORK_ACCESS = 'true';
+    resetTransportForTests();
+    const recorder: SpawnRecorder = { stdinWritten: [], killCalls: [] };
+    const fake = makeFakeChild();
+    const opts = makeOpts();
+
+    const runPromise = runSubagentViaCodex(opts, prisma, {
+      spawnImpl: makeSpawnMock(recorder, fake),
+    });
+
+    await waitForSpawn(recorder);
+    fake.pushStdout(
+      `${JSON.stringify({
+        type: 'turn.completed',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      })}\n`,
+    );
+    fake.close(0);
+
+    await runPromise;
+
+    expect(recorder.args).toEqual([
+      'exec',
+      '--json',
+      '--ephemeral',
+      '--skip-git-repo-check',
+      '-c',
+      'sandbox_workspace_write.network_access=true',
+      '--sandbox',
+      'workspace-write',
+      '-C',
+      opts.cwd,
+      '-m',
+      'gpt-5-codex',
+      '-',
+    ]);
   });
 
   it('exit ??? turn.completed ?????????? result=null ? ?? ????? spend', async () => {
