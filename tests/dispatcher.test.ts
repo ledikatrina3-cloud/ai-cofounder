@@ -367,8 +367,11 @@ describe('runRoutine — skip-ветки', () => {
     // Нет parentId (нет event.routine.trigger).
     expect(skips[0]?.parentId).toBeNull();
 
-    // emit routine.end status='skipped'.
+    // Live-start не отправляем для непринятого запуска: иначе UI может зависнуть.
     const calls = vi.mocked(emit).mock.calls.map(([ev]) => ev);
+    expect(calls.find((c) => c.type === 'routine.start')).toBeUndefined();
+
+    // emit routine.end status='skipped'.
     const endEvent = calls.find((c) => c.type === 'routine.end');
     expect(endEvent).toBeDefined();
     if (endEvent?.type === 'routine.end') {
@@ -430,6 +433,25 @@ describe('runRoutine — skip-ветки', () => {
     expect(await countRecords(isolated.prisma, 'audit.routine.skipped')).toBe(1);
     const skips = await selectRecords<{ reason: string }>(isolated.prisma, 'audit.routine.skipped');
     expect(skips[0]?.properties.reason).toBe('project-disabled');
+  });
+
+  it('ошибка загрузки routine не отправляет routine.start без durable trigger', async () => {
+    const trigger = triggerManualRoutine(ROUTINE_ID);
+
+    await expect(
+      runRoutine(ROUTINE_ID, RUN_DATE, trigger, {
+        db: isolated.prisma,
+        getRoutine: async () => {
+          throw new Error('loader exploded');
+        },
+      }),
+    ).rejects.toThrow('loader exploded');
+
+    expect(await countRecords(isolated.prisma, 'event.routine.trigger')).toBe(0);
+    expect(await countRecords(isolated.prisma, 'audit.routine.start')).toBe(0);
+    expect(await countRecords(isolated.prisma, 'audit.routine.end')).toBe(0);
+    const calls = vi.mocked(emit).mock.calls.map(([ev]) => ev);
+    expect(calls.find((c) => c.type === 'routine.start')).toBeUndefined();
   });
 });
 
@@ -529,5 +551,64 @@ describe('runRoutine — department budget guard', () => {
     // вызван.
     expect(exec).toHaveBeenCalledTimes(1);
     expect(await countRecords(isolated.prisma, 'audit.budget.deny')).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Кейс 8. Completion signals: dispatcher вызывает signal hook только после ok.
+// ---------------------------------------------------------------------------
+
+describe('runRoutine — completion signals', () => {
+  it("status='ok' → вызывает completion signal hook с eventTriggerId", async () => {
+    const registry = fakeRegistry({
+      routines: new Map([[ROUTINE_ID, makeRoutine({ outputType: 'journal-only' })]]),
+      projects: new Map([[PROJECT_ID, makeProject()]]),
+    });
+    const trigger = triggerManualRoutine(ROUTINE_ID);
+    const signalHook = vi.fn(
+      async (
+        _args: Parameters<NonNullable<RunRoutineDeps['handleRoutineCompletedSignalImpl']>>[0],
+      ) => {},
+    );
+
+    await runRoutine(ROUTINE_ID, RUN_DATE, trigger, {
+      db: isolated.prisma,
+      ...registry,
+      executeRoutineImpl: makeNoopExecuteRoutine('ok') as RunRoutineDeps['executeRoutineImpl'],
+      handleRoutineCompletedSignalImpl: signalHook,
+    });
+
+    const triggers = await selectRecords<Record<string, unknown>>(
+      isolated.prisma,
+      'event.routine.trigger',
+    );
+    expect(signalHook).toHaveBeenCalledOnce();
+    const signalArgs = signalHook.mock.calls[0]?.[0];
+    expect(signalArgs?.db).toBe(isolated.prisma);
+    expect(signalArgs?.sourceRoutineId).toBe(ROUTINE_ID);
+    expect(signalArgs?.runDate).toBe(RUN_DATE);
+    expect(signalArgs?.sourceEventTriggerId).toBe(triggers[0]?.id);
+  });
+
+  it("status='failed' → не вызывает completion signal hook", async () => {
+    const registry = fakeRegistry({
+      routines: new Map([[ROUTINE_ID, makeRoutine({ outputType: 'journal-only' })]]),
+      projects: new Map([[PROJECT_ID, makeProject()]]),
+    });
+    const trigger = triggerManualRoutine(ROUTINE_ID);
+    const signalHook = vi.fn(
+      async (
+        _args: Parameters<NonNullable<RunRoutineDeps['handleRoutineCompletedSignalImpl']>>[0],
+      ) => {},
+    );
+
+    await runRoutine(ROUTINE_ID, RUN_DATE, trigger, {
+      db: isolated.prisma,
+      ...registry,
+      executeRoutineImpl: makeNoopExecuteRoutine('failed') as RunRoutineDeps['executeRoutineImpl'],
+      handleRoutineCompletedSignalImpl: signalHook,
+    });
+
+    expect(signalHook).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,4 @@
+subscriptions:
+  - on: routine.completed
+    source: article-brief-researcher
+    run: article-writer

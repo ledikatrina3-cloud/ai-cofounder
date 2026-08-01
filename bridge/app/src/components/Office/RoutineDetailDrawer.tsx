@@ -55,6 +55,16 @@ interface SkillsResponse {
   error?: string;
 }
 
+interface ArticleBriefResponse {
+  ok: boolean;
+  path?: string;
+  status?: string;
+  title?: string | null;
+  coreKeyword?: string | null;
+  markdown?: string;
+  error?: string;
+}
+
 interface RoutineDetailDrawerProps {
   routineId: string | null;
   onClose: () => void;
@@ -619,6 +629,10 @@ function DrawerBody(props: DrawerBodyProps): ReactNode {
           </div>
         )}
 
+        {(routine.id === 'article-brief-researcher' || routine.id === 'article-writer') && (
+          <ArticleBriefReviewPanel accentColor={accentColor} />
+        )}
+
         {/* Skills — резолвнутые скиллы routine'ы (Фаза 3 плана
             2026-05-21-skills-architecture-v3, п.8). С транзитивными deps
             (резолвит бэкенд через resolveDeps). Кнопка «Подробнее»
@@ -904,6 +918,174 @@ function DrawerBody(props: DrawerBodyProps): ReactNode {
         )}
       </div>
     </>
+  );
+}
+
+function ArticleBriefReviewPanel({ accentColor }: { accentColor: string }): ReactNode {
+  const [brief, setBrief] = useState<ArticleBriefResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const loadBrief = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`${BRIDGE_URL}/content/briefs/latest`);
+      const body = (await res.json().catch(() => null)) as ArticleBriefResponse | null;
+      setBrief(body ?? { ok: false, error: `HTTP ${res.status}` });
+    } catch (err) {
+      setBrief({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBrief();
+  }, [loadBrief]);
+
+  const runWriter = useCallback(async (): Promise<void> => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      if (brief?.status === 'needs_human_review') {
+        const approveRes = await fetch(`${BRIDGE_URL}/content/briefs/latest/approve`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+        });
+        const approveBody = (await approveRes
+          .json()
+          .catch(() => null)) as ArticleBriefResponse | null;
+        if (!approveRes.ok || approveBody?.ok !== true) {
+          throw new Error(approveBody?.error ?? `approve failed: HTTP ${approveRes.status}`);
+        }
+      }
+
+      const runRes = await fetch(`${BRIDGE_URL}/routines/article-writer/run`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      });
+      const runBody = (await runRes.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+      } | null;
+      if (!runRes.ok || runBody?.ok !== true) {
+        throw new Error(runBody?.error ?? `writer run failed: HTTP ${runRes.status}`);
+      }
+      setMessage('writer запущен');
+      await loadBrief();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [brief?.status, loadBrief]);
+
+  const status = brief?.status ?? 'unknown';
+  const needsReview = status === 'needs_human_review';
+  const canRun = brief?.ok === true && (needsReview || status === 'approved');
+
+  return (
+    <Section title="brief review">
+      <div
+        style={{
+          padding: 12,
+          border: `1px solid ${needsReview ? '#c4a747' : 'rgba(217,119,87,0.22)'}`,
+          borderRadius: 4,
+          background: needsReview ? 'rgba(196,167,71,0.08)' : 'rgba(217,119,87,0.05)',
+        }}
+      >
+        {loading ? (
+          <div style={{ opacity: 0.65 }}>loading latest brief...</div>
+        ) : brief?.ok !== true ? (
+          <div style={{ color: '#b25555' }}>brief не найден: {brief?.error ?? 'unknown error'}</div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+              <Pill color={needsReview ? '#c4a747' : '#7cb29a'}>Status: {status}</Pill>
+              {brief.coreKeyword !== null && brief.coreKeyword !== undefined && (
+                <Pill color="#7c9eb2">{brief.coreKeyword}</Pill>
+              )}
+            </div>
+            {brief.title !== null && brief.title !== undefined && (
+              <div style={{ fontSize: 12, color: accentColor, lineHeight: 1.4, marginBottom: 8 }}>
+                {brief.title}
+              </div>
+            )}
+            <div style={{ fontSize: 10, opacity: 0.55, marginBottom: 8 }}>{brief.path}</div>
+            <pre
+              style={{
+                margin: 0,
+                padding: 10,
+                fontSize: 10,
+                fontFamily: 'JetBrains Mono, Menlo, monospace',
+                color: '#e9e3dc',
+                background: 'rgba(0,0,0,0.24)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 3,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                maxHeight: 360,
+                overflow: 'auto',
+                lineHeight: 1.45,
+              }}
+            >
+              {brief.markdown}
+            </pre>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button
+                type="button"
+                onClick={runWriter}
+                disabled={!canRun || busy}
+                style={{
+                  flex: 1,
+                  padding: '9px 10px',
+                  fontFamily: 'inherit',
+                  fontSize: 11,
+                  color: '#0a0a0a',
+                  background: canRun ? accentColor : 'rgba(255,255,255,0.12)',
+                  border: `1px solid ${canRun ? accentColor : 'rgba(255,255,255,0.12)'}`,
+                  borderRadius: 3,
+                  cursor: canRun && !busy ? 'pointer' : 'not-allowed',
+                  opacity: busy ? 0.65 : 1,
+                }}
+              >
+                {needsReview ? 'Подтвердить и запустить writer' : 'Запустить writer'}
+              </button>
+              <button
+                type="button"
+                onClick={loadBrief}
+                disabled={busy}
+                style={{
+                  padding: '9px 10px',
+                  fontFamily: 'inherit',
+                  fontSize: 11,
+                  color: accentColor,
+                  background: 'transparent',
+                  border: `1px solid ${accentColor}`,
+                  borderRadius: 3,
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Обновить
+              </button>
+            </div>
+            {message !== null && (
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 10,
+                  color: message.includes('failed') ? '#b25555' : '#9ca77c',
+                }}
+              >
+                {message}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Section>
   );
 }
 

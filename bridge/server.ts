@@ -17,6 +17,7 @@
 // сервер чисто. Слушаем localhost — не bind'имся на 0.0.0.0, не торчим в LAN.
 
 import { existsSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { serve } from '@hono/node-server';
@@ -1055,6 +1056,67 @@ export async function startBridgeServer(
           ? '. Запусти `pnpm exec tsc -p tsconfig.json` чтобы появился dist/src/llm/call.js'
           : '';
       return c.json({ ok: false, error: `${msg}${hint}` }, 500);
+    }
+  });
+
+  // GET /content/briefs/latest — текущий article brief для human review gate.
+  app.get('/content/briefs/latest', async (c) => {
+    const briefPath = resolve(process.cwd(), 'content', 'briefs', 'article-brief-latest.md');
+    try {
+      const markdown = await readFile(briefPath, 'utf8');
+      const statusMatch = /^Status:\s*(.+)$/m.exec(markdown);
+      const titleMatch = /^#\s+Article Brief:\s*(.+)$/m.exec(markdown);
+      const keywordMatch = /^CORE-KEYWORD:\s*(.+)$/m.exec(markdown);
+      return c.json({
+        ok: true,
+        path: briefPath,
+        status: statusMatch?.[1]?.trim() ?? 'unknown',
+        title: titleMatch?.[1]?.trim() ?? null,
+        coreKeyword: keywordMatch?.[1]?.trim() ?? null,
+        markdown,
+      });
+    } catch (err) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : '';
+      if (code === 'ENOENT') {
+        return c.json({ ok: false, error: 'latest brief не найден' }, 404);
+      }
+      console.error('[content/briefs/latest]', err);
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  // POST /content/briefs/latest/approve — ручное подтверждение brief.
+  // Меняет только Status в latest-файле; writer потом можно запустить обычной кнопкой.
+  app.post('/content/briefs/latest/approve', async (c) => {
+    const briefPath = resolve(process.cwd(), 'content', 'briefs', 'article-brief-latest.md');
+    try {
+      const markdown = await readFile(briefPath, 'utf8');
+      if (!/^Status:\s*needs_human_review\s*$/m.test(markdown)) {
+        const statusMatch = /^Status:\s*(.+)$/m.exec(markdown);
+        return c.json(
+          {
+            ok: false,
+            error: `brief сейчас не в needs_human_review (Status: ${statusMatch?.[1]?.trim() ?? 'unknown'})`,
+          },
+          409,
+        );
+      }
+      const updated = markdown.replace(/^Status:\s*needs_human_review\s*$/m, 'Status: approved');
+      await writeFile(briefPath, updated, 'utf8');
+      return c.json({ ok: true, path: briefPath, status: 'approved' });
+    } catch (err) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : '';
+      if (code === 'ENOENT') {
+        return c.json({ ok: false, error: 'latest brief не найден' }, 404);
+      }
+      console.error('[content/briefs/latest/approve]', err);
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
 
