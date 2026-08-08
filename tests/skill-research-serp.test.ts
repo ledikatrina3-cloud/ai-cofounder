@@ -22,6 +22,21 @@ const FIXTURE_HTML = `
 </body></html>
 `;
 
+const LITE_FIXTURE_HTML = `
+<html><body>
+  <table>
+    <tr>
+      <td>
+        <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Flite.example%2Farticle">Lite Result &amp; Guide</a>
+      </td>
+    </tr>
+    <tr>
+      <td class="result-snippet">Lite snippet with &lt;business&gt; context.</td>
+    </tr>
+  </table>
+</body></html>
+`;
+
 describe('parseSerpHtml', () => {
   it('извлекает title, url, snippet из двух результатов', () => {
     const out = parseSerpHtml(FIXTURE_HTML, 10);
@@ -46,6 +61,17 @@ describe('parseSerpHtml', () => {
   it('возвращает пустой массив для не-DDG HTML', () => {
     const out = parseSerpHtml('<html>no results</html>', 10);
     expect(out).toEqual([]);
+  });
+
+  it('извлекает результаты из DuckDuckGo Lite HTML', () => {
+    const out = parseSerpHtml(LITE_FIXTURE_HTML, 10);
+    expect(out).toEqual([
+      {
+        title: 'Lite Result & Guide',
+        url: 'https://lite.example/article',
+        snippet: 'Lite snippet with <business> context.',
+      },
+    ]);
   });
 });
 
@@ -82,6 +108,31 @@ describe('fetchSerp (с моком fetch)', () => {
     const out = await fetchSerp('test', { fetcher });
     expect(out.results).toEqual([]);
     expect(out.errors[0]).toMatch(/капча|пуст|не вернул/i);
+  });
+
+  it('делает fallback на запасной DDG endpoint если первый HTML пустой', async () => {
+    const requestedUrls: string[] = [];
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      requestedUrls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        text: async () => (requestedUrls.length === 1 ? '<html>empty</html>' : LITE_FIXTURE_HTML),
+      };
+    }) as unknown as typeof fetch;
+
+    const out = await fetchSerp('test topic', { fetcher, retryDelayMs: 0 } as any);
+
+    expect(out.errors).toEqual([]);
+    expect(out.results).toEqual([
+      {
+        title: 'Lite Result & Guide',
+        url: 'https://lite.example/article',
+        snippet: 'Lite snippet with <business> context.',
+      },
+    ]);
+    expect(requestedUrls.length).toBeGreaterThanOrEqual(2);
+    expect(requestedUrls.some((url) => url.includes('lite.duckduckgo.com'))).toBe(true);
   });
 
   it('обрабатывает throw из fetch (network error)', async () => {

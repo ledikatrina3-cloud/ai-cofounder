@@ -366,7 +366,7 @@ export function emitFromSDKMessage(
       } else if (b.type === 'text' && typeof b.text === 'string') {
         const text = b.text.trim();
         if (text.length > 0) {
-          void emit({ type: 'assistant.message', text: text.slice(0, 500) });
+          void emit({ type: 'assistant.message', text });
           if (thinking !== undefined) {
             thinking.buffer.value =
               (thinking.buffer.value.length > 0 ? `${thinking.buffer.value} ` : '') + text;

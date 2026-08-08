@@ -78,7 +78,116 @@ export function escapeXml(s: string): string {
  * Экспортируется для unit-тестов.
  */
 export function renderTemplate(templateSvg: string, title: string): string {
-  return templateSvg.replace(/\{\{TITLE\}\}/g, escapeXml(title));
+  const nativeTextSvg = replaceTitleForeignObject(templateSvg, title);
+  return nativeTextSvg.replace(/\{\{TITLE\}\}/g, escapeXml(title));
+}
+
+interface NativeTextBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fill: string;
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: string;
+  lineHeight: number;
+}
+
+const TITLE_FOREIGN_OBJECT_RE =
+  /<foreignObject\b([^>]*)>([\s\S]*?\{\{TITLE\}\}[\s\S]*?)<\/foreignObject>/g;
+
+function replaceTitleForeignObject(templateSvg: string, title: string): string {
+  return templateSvg.replace(TITLE_FOREIGN_OBJECT_RE, (_match, attrs: string, body: string) => {
+    const style = parseStyle(body);
+    const fontSize = parseCssPx(style['font-size'], 60);
+    const lineHeight = parseLineHeight(style['line-height'], fontSize);
+    const box: NativeTextBox = {
+      x: parseSvgNumberAttr(attrs, 'x', 80),
+      y: parseSvgNumberAttr(attrs, 'y', 180),
+      width: parseSvgNumberAttr(attrs, 'width', 1040),
+      height: parseSvgNumberAttr(attrs, 'height', 280),
+      fill: style.color ?? '#F8FAFC',
+      fontFamily: style['font-family'] ?? '-apple-system, system-ui, sans-serif',
+      fontSize,
+      fontWeight: style['font-weight'] ?? '700',
+      lineHeight,
+    };
+    return renderNativeText(title, box);
+  });
+}
+
+function parseSvgNumberAttr(attrs: string, name: string, fallback: number): number {
+  const re = new RegExp(`\\b${name}="([^"]+)"`);
+  const raw = re.exec(attrs)?.[1];
+  if (raw === undefined) return fallback;
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function parseStyle(body: string): Record<string, string> {
+  const styleAttr = /style="([^"]*)"/.exec(body)?.[1] ?? '';
+  const style: Record<string, string> = {};
+  for (const part of styleAttr.split(';')) {
+    const [rawKey, ...rawValue] = part.split(':');
+    const key = rawKey?.trim().toLowerCase();
+    const value = rawValue.join(':').trim();
+    if (key && value) style[key] = value;
+  }
+  return style;
+}
+
+function parseCssPx(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function parseLineHeight(raw: string | undefined, fontSize: number): number {
+  if (raw === undefined) return fontSize * 1.18;
+  const value = Number.parseFloat(raw);
+  if (!Number.isFinite(value)) return fontSize * 1.18;
+  return raw.trim().endsWith('px') ? value : value * fontSize;
+}
+
+function renderNativeText(title: string, box: NativeTextBox): string {
+  const maxChars = Math.max(8, Math.floor(box.width / (box.fontSize * 0.72)));
+  const lines = wrapTitle(title, maxChars);
+  const totalHeight = box.fontSize + (lines.length - 1) * box.lineHeight;
+  const startY = box.y + Math.max(0, (box.height - totalHeight) / 2) + box.fontSize;
+  const tspans = lines
+    .map((line, index) => {
+      const dy = index === 0 ? 0 : box.lineHeight;
+      return `<tspan x="${box.x}" dy="${dy}">${escapeXml(line)}</tspan>`;
+    })
+    .join('');
+
+  return `<text x="${box.x}" y="${round(startY)}" fill="${escapeXml(box.fill)}" font-family="${escapeXml(
+    box.fontFamily,
+  )}" font-size="${box.fontSize}" font-weight="${escapeXml(box.fontWeight)}">${tspans}</text>`;
+}
+
+function wrapTitle(title: string, maxChars: number): string[] {
+  const words = title.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [''];
+
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const next = current.length === 0 ? word : `${current} ${word}`;
+    if (next.length <= maxChars || current.length === 0) {
+      current = next;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current.length > 0) lines.push(current);
+  return lines;
+}
+
+function round(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 const TEMPLATES_DIR_REL = '../assets/templates';

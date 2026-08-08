@@ -17,6 +17,7 @@
 // сервер чисто. Слушаем localhost — не bind'имся на 0.0.0.0, не торчим в LAN.
 
 import { existsSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { serve } from '@hono/node-server';
@@ -1055,6 +1056,232 @@ export async function startBridgeServer(
           ? '. Запусти `pnpm exec tsc -p tsconfig.json` чтобы появился dist/src/llm/call.js'
           : '';
       return c.json({ ok: false, error: `${msg}${hint}` }, 500);
+    }
+  });
+
+  // GET /content/briefs/latest — текущий article brief для human review gate.
+  app.get('/content/briefs/latest', async (c) => {
+    const briefPath = resolve(process.cwd(), 'content', 'briefs', 'article-brief-latest.md');
+    try {
+      const markdown = await readFile(briefPath, 'utf8');
+      const statusMatch = /^Status:\s*(.+)$/m.exec(markdown);
+      const titleMatch = /^#\s+Article Brief:\s*(.+)$/m.exec(markdown);
+      const keywordMatch = /^CORE-KEYWORD:\s*(.+)$/m.exec(markdown);
+      return c.json({
+        ok: true,
+        path: briefPath,
+        status: statusMatch?.[1]?.trim() ?? 'unknown',
+        title: titleMatch?.[1]?.trim() ?? null,
+        coreKeyword: keywordMatch?.[1]?.trim() ?? null,
+        markdown,
+      });
+    } catch (err) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : '';
+      if (code === 'ENOENT') {
+        return c.json({ ok: false, error: 'latest brief не найден' }, 404);
+      }
+      console.error('[content/briefs/latest]', err);
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  const latestBriefPath = (): string =>
+    resolve(process.cwd(), 'content', 'briefs', 'article-brief-latest.md');
+
+  function briefStatus(markdown: string): string {
+    return /^Status:\s*(.+)$/m.exec(markdown)?.[1]?.trim() ?? 'unknown';
+  }
+
+  function ensureReviewableBrief(markdown: string): { ok: true } | { ok: false; status: string } {
+    const status = briefStatus(markdown);
+    if (status !== 'needs_human_review') return { ok: false, status };
+    return { ok: true };
+  }
+
+  function updateBriefDecision(
+    markdown: string,
+    status: string,
+    action: string,
+    comment: string,
+  ): string {
+    const cleanedComment = comment.trim();
+    const updated = markdown.replace(/^Status:\s*needs_human_review\s*$/m, `Status: ${status}`);
+    const note = [
+      '',
+      '## Human review decision',
+      `- Date: ${new Date().toISOString()}`,
+      `- Action: ${action}`,
+      ...(cleanedComment !== '' ? [`- Comment: ${cleanedComment}`] : []),
+      '',
+    ].join('\n');
+    return `${updated.trimEnd()}\n${note}`;
+  }
+
+  function briefReadErrorResponse(c: Context, err: unknown, label: string): Response {
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : '';
+    if (code === 'ENOENT') {
+      return c.json({ ok: false, error: 'latest brief not found' }, 404);
+    }
+    console.error(label, err);
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+
+  async function readReviewComment(c: Context): Promise<string> {
+    const body = (await c.req.json().catch(() => ({}))) as { comment?: unknown };
+    return typeof body.comment === 'string' ? body.comment.slice(0, 4000) : '';
+  }
+
+  const topicsBacklogPath = (): string =>
+    resolve(process.cwd(), 'departments', 'marketing-content', 'shared', 'topics-backlog.md');
+
+  function sanitizeBacklogComment(comment: string): string {
+    return comment.trim().replace(/--/g, '- -').replace(/\s+/g, ' ').slice(0, 500);
+  }
+
+  async function markFirstOpenBacklogTopic(
+    action: 'rejected' | 'skipped',
+    comment: string,
+  ): Promise<{ path: string; topic: string } | null> {
+    const backlogPath = topicsBacklogPath();
+    let markdown: string;
+    try {
+      markdown = await readFile(backlogPath, 'utf8');
+    } catch (err) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : '';
+      if (code === 'ENOENT') return null;
+      throw err;
+    }
+
+    const lines = markdown.split(/\r?\n/);
+    const index = lines.findIndex((line) => /^- \[ \]\s+/.test(line));
+    if (index === -1) return null;
+
+    const original = lines[index] ?? '';
+    const topic = original.replace(/^- \[ \]\s+/, '').trim();
+    const cleanedComment = sanitizeBacklogComment(comment);
+    const note = `<!-- ${action} ${new Date().toISOString()}${cleanedComment !== '' ? `: ${cleanedComment}` : ''} -->`;
+    lines[index] = `${original.replace(/^- \[ \]/, '- [x]')} ${note}`;
+    await writeFile(backlogPath, lines.join('\n'), 'utf8');
+    return { path: backlogPath, topic };
+  }
+
+  // POST /content/briefs/latest/approve ? ?????? ????????????? brief.
+  // ?????? ?????? Status ? latest-?????; writer ????? ????? ????????? ??????? ???????.
+  app.post('/content/briefs/latest/approve', async (c) => {
+    const briefPath = latestBriefPath();
+    try {
+      const markdown = await readFile(briefPath, 'utf8');
+      const reviewable = ensureReviewableBrief(markdown);
+      if (!reviewable.ok) {
+        return c.json(
+          {
+            ok: false,
+            error: `brief is not in needs_human_review (Status: ${reviewable.status})`,
+          },
+          409,
+        );
+      }
+      const updated = markdown.replace(/^Status:\s*needs_human_review\s*$/m, 'Status: approved');
+      await writeFile(briefPath, updated, 'utf8');
+      return c.json({ ok: true, path: briefPath, status: 'approved' });
+    } catch (err) {
+      return briefReadErrorResponse(c, err, '[content/briefs/latest/approve]');
+    }
+  });
+
+  // POST /content/briefs/latest/reject ? ????????? ????/brief ??? ??????? writer.
+  app.post('/content/briefs/latest/reject', async (c) => {
+    const briefPath = latestBriefPath();
+    try {
+      const comment = await readReviewComment(c);
+      const markdown = await readFile(briefPath, 'utf8');
+      const reviewable = ensureReviewableBrief(markdown);
+      if (!reviewable.ok) {
+        return c.json(
+          {
+            ok: false,
+            error: `brief is not in needs_human_review (Status: ${reviewable.status})`,
+          },
+          409,
+        );
+      }
+      const updated = updateBriefDecision(markdown, 'rejected', 'reject', comment);
+      await writeFile(briefPath, updated, 'utf8');
+      const backlogTopic = await markFirstOpenBacklogTopic('rejected', comment);
+      return c.json({ ok: true, path: briefPath, status: 'rejected', backlogTopic });
+    } catch (err) {
+      return briefReadErrorResponse(c, err, '[content/briefs/latest/reject]');
+    }
+  });
+
+  // POST /content/briefs/latest/research-retry ? ????????? brief ?? ????? ????????????.
+  app.post('/content/briefs/latest/research-retry', async (c) => {
+    const briefPath = latestBriefPath();
+    try {
+      const comment = await readReviewComment(c);
+      if (comment.trim() === '') {
+        return c.json({ ok: false, error: 'comment is required for research retry' }, 400);
+      }
+
+      const markdown = await readFile(briefPath, 'utf8');
+      const reviewable = ensureReviewableBrief(markdown);
+      if (!reviewable.ok) {
+        return c.json(
+          {
+            ok: false,
+            error: `brief is not in needs_human_review (Status: ${reviewable.status})`,
+          },
+          409,
+        );
+      }
+
+      const dispatcherPath = resolve(process.cwd(), 'dist', 'src', 'core', 'dispatcher.js');
+      const triggersPath = resolve(process.cwd(), 'dist', 'src', 'core', 'triggers.js');
+      const dispatcher = (await import(pathToFileURL(dispatcherPath).href)) as {
+        runRoutine: (id: string, runDate: string, trigger: unknown) => Promise<void>;
+      };
+      const triggers = (await import(pathToFileURL(triggersPath).href)) as {
+        triggerManualRoutine: (id: string) => unknown;
+      };
+
+      const updated = updateBriefDecision(
+        markdown,
+        'research_requested',
+        'research-retry',
+        comment,
+      );
+      await writeFile(briefPath, updated, 'utf8');
+      const backlogTopic = await markFirstOpenBacklogTopic('skipped', comment);
+
+      const now = new Date();
+      const runDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const routineId = 'article-brief-researcher';
+      const trigger = triggers.triggerManualRoutine(routineId);
+      void dispatcher.runRoutine(routineId, runDate, trigger).catch((err: unknown) => {
+        console.error('[/content/briefs/latest/research-retry] runRoutine threw', err);
+      });
+      return c.json(
+        {
+          ok: true,
+          path: briefPath,
+          status: 'research_requested',
+          routineId,
+          runDate,
+          backlogTopic,
+        },
+        202,
+      );
+    } catch (err) {
+      return briefReadErrorResponse(c, err, '[content/briefs/latest/research-retry]');
     }
   });
 

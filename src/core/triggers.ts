@@ -33,8 +33,12 @@ export interface EventTrigger {
 //     `pnpm dev:run` уникален. ULID гарантирует строгое возрастание во времени
 //     (полезно для логов), без дедупа.
 export interface RunRoutineTrigger {
-  source: 'cron' | 'manual';
+  source: 'cron' | 'manual' | 'signal';
   idempotencyKey: string;
+  signal?: {
+    rootEventTriggerId: string;
+    visitedRoutineIds: string[];
+  };
 }
 
 // Cron 07:00 утренний детектив (src/core/triggers.ts:17,

@@ -109,13 +109,63 @@ describe('getBotToken', () => {
 
   it('null из Keychain → TelegramTokenMissingError с инструкцией про pnpm pair', async () => {
     const mockKeychain: KeychainGetter = { getPassword: async () => null };
-    await expect(getBotToken(mockKeychain)).rejects.toBeInstanceOf(TelegramTokenMissingError);
-    await expect(getBotToken(mockKeychain)).rejects.toThrow(/pnpm pair/);
+    const missingFileReader: ReadAllowlist = {
+      read: async () => {
+        throw new Error('ENOENT');
+      },
+    };
+    await expect(getBotToken(mockKeychain, missingFileReader, '/no/such/cwd')).rejects.toBeInstanceOf(
+      TelegramTokenMissingError,
+    );
+    await expect(getBotToken(mockKeychain, missingFileReader, '/no/such/cwd')).rejects.toThrow(
+      /pnpm pair/,
+    );
   });
 
   it('пустая строка из Keychain — тоже missing', async () => {
     const mockKeychain: KeychainGetter = { getPassword: async () => '' };
-    await expect(getBotToken(mockKeychain)).rejects.toBeInstanceOf(TelegramTokenMissingError);
+    const missingFileReader: ReadAllowlist = {
+      read: async () => {
+        throw new Error('ENOENT');
+      },
+    };
+    await expect(getBotToken(mockKeychain, missingFileReader, '/no/such/cwd')).rejects.toBeInstanceOf(
+      TelegramTokenMissingError,
+    );
+  });
+
+  it('falls back to .secrets token file when Secret Service is unavailable on VPS', async () => {
+    const mockKeychain: KeychainGetter = {
+      getPassword: vi.fn(async () => {
+        throw new Error('The name org.freedesktop.secrets was not provided by any .service files');
+      }),
+    };
+    const fileReader: ReadAllowlist = {
+      read: vi.fn(async (path) => {
+        expect(path).toMatch(/\.secrets\/telegram-bot-token$/);
+        return ' file-token-from-vps \n';
+      }),
+    };
+
+    await expect(getBotToken(mockKeychain, fileReader, '/srv/ai-cofounder')).resolves.toBe(
+      'file-token-from-vps',
+    );
+  });
+
+  it('falls back to .secrets token file when Keychain is empty on VPS', async () => {
+    const mockKeychain: KeychainGetter = {
+      getPassword: vi.fn(async () => null),
+    };
+    const fileReader: ReadAllowlist = {
+      read: vi.fn(async (path) => {
+        expect(path).toMatch(/\.secrets\/telegram-bot-token$/);
+        return ' file-token-from-empty-keychain \n';
+      }),
+    };
+
+    await expect(getBotToken(mockKeychain, fileReader, '/srv/ai-cofounder')).resolves.toBe(
+      'file-token-from-empty-keychain',
+    );
   });
 });
 
