@@ -112,6 +112,37 @@ To scaffold a brand-new agent interactively (one question at a time, then valida
 - Write a clear PR description: what changed, why, and which gate/test proves it. If you added an engine top-level dir, say that you updated `engine-manifest.json`. If you touched the agent loader, registry, or the split, note which proof test covers it.
 - Keep engine changes and example/user-shaped changes in separate, focused PRs where possible.
 
+### Codex Desktop publish flow for this fork
+
+When Codex Desktop prepares a PR for the `ledikatrina3-cloud/ai-cofounder` fork,
+use a clean local clone instead of pushing from a live runtime checkout. Runtime
+machines can have no `origin`, no `gh`, and a dirty user layer; a clean clone
+keeps the PR scoped and avoids committing local state.
+
+```powershell
+$base = "C:\MyWork\AI-Cofounder\pr-worktrees"
+git clone -c core.autocrlf=false --depth 1 https://github.com/ledikatrina3-cloud/ai-cofounder.git "$base\<pr-name>"
+cd "$base\<pr-name>"
+git switch -c agent/<short-scope>
+```
+
+Copy or edit only the intended engine/example files, then validate in the clean
+clone. On Windows, keep `core.autocrlf=false`; otherwise Biome can fail on CRLF
+line-ending churn across the whole repo.
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm exec vitest <focused-test-files> --run
+git add <explicit-file-1> <explicit-file-2>
+git commit -m "<short summary>"
+git push -u origin agent/<short-scope>
+gh pr create --repo ledikatrina3-cloud/ai-cofounder --base main --head agent/<short-scope> --draft --title "<title>" --body-file <body.md>
+```
+
+If the runtime checkout has changes under ignored user paths (`agents/`, `org/`,
+`ai-clone/`, `content/`), mirror the fix into tracked engine/template paths such
+as `examples/`, `skills/`, `scripts/`, `tests/`, or `docs/` before opening the PR.
+
 ---
 
 ## 7. A note on user customization
