@@ -9,6 +9,12 @@ describe('article writer mastery and publication contract', () => {
   const skill = read('skills/article-writing/SKILL.md');
   const rules = read('agents/article-writer/rules.md');
 
+  it('continues from a complete local brief when public SERP is unavailable', () => {
+    expect(prompt).toContain('SERP unavailable не останавливает локально подтверждённую статью');
+    expect(prompt).toContain('не используй внешние факты, цифры, цитаты');
+    expect(prompt).toContain('продолжай по brief, локальному контексту и mastery');
+  });
+
   it('requires topical mastery before drafting and redaktor mastery after drafting', () => {
     for (const contract of [prompt, skill, rules]) {
       expect(contract).toContain('mastery/redaktor/INDEX.md');
