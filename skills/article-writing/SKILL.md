@@ -62,3 +62,18 @@ node scripts/article-business-readability-check.mjs content/<slug>.md --json > c
 - чек-лист имеет незакрытые `[ ]`;
 - `ai-cadence`, `structure`, `diversity`, `business-readability`,
   confidentiality или форматный gate не прошёл.
+
+## Mastery, редактура и публикации
+
+- До драфта открыть `mastery/INDEX.md` и минимум один профильный mastery-файл.
+  В research записать точные пути и применённые методы.
+- После драфта открыть `mastery/redaktor/INDEX.md` и минимум один рекомендованный
+  им файл. В QA записать точные пути, применённые методы, изменения и повторную
+  сверку с голосом Екатерины.
+- Перед внутренней ссылкой прочитать `content/published-articles.json`. Ссылка
+  допустима только при `status: published` и явном публичном URL `https://...`.
+  `status: ready` не означает `published`; URL по slug или имени файла не угадывать.
+- Если подтверждённого URL нет, прошлую статью не упоминать как опубликованную и
+  ссылку не добавлять.
+- В публичные Markdown/HTML запрещено добавлять `## Источники`. Evidence хранится
+  только в research и QA.

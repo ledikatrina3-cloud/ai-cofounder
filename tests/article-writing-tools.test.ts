@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,7 +19,7 @@ function runStructureCheck(file: string) {
 }
 
 describe('article-writing transferred tools', () => {
-  it('accepts internal CTA links when no config cta.url is set', () => {
+  it('accepts a public article without sources or unverified internal links', () => {
     const candidate = writeArticle(
       [
         '# Заявки теряются до первого ответа',
@@ -32,11 +32,7 @@ describe('article-writing transferred tools', () => {
         '',
         '## Что проверить за неделю',
         '',
-        'Начните с [разбора первого ответа](/blog/first-response).',
-        '',
-        '## Источники',
-        '',
-        '- Внутренний разбор последней статьи.',
+        'Начните с проверки первого ответа клиенту.',
       ].join('\n'),
     );
 
@@ -46,7 +42,7 @@ describe('article-writing transferred tools', () => {
     expect(result.stdout).toContain('OK');
   });
 
-  it('still flags missing source sections', () => {
+  it('flags a public sources section', () => {
     const candidate = writeArticle(
       [
         '# Заявки теряются до первого ответа',
@@ -59,13 +55,34 @@ describe('article-writing transferred tools', () => {
         '',
         '## Что проверить за неделю',
         '',
-        'Начните с [разбора первого ответа](/blog/first-response).',
+        'Начните с проверки первого ответа клиенту.',
+        '',
+        '## Источники',
+        '',
+        '- Внутренний разбор последней статьи.',
       ].join('\n'),
     );
 
     const result = runStructureCheck(candidate);
 
     expect(result.status).not.toBe(0);
-    expect(result.stdout).toContain('нет раздела');
+    expect(result.stdout).toContain('служебный раздел');
+  });
+
+  it('converts verified https links to anchors in paste-ready HTML', () => {
+    const candidate = writeArticle(
+      '# Тест\n\nСмотрите [опубликованную статью](https://example.ru/blog/test).\n',
+    );
+    const output = `${candidate}.html`;
+    const result = spawnSync(
+      'node',
+      ['scripts/article-markdown-to-html.mjs', candidate, output],
+      { cwd: process.cwd(), encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(output, 'utf8')).toContain(
+      '<a href="https://example.ru/blog/test">опубликованную статью</a>',
+    );
   });
 });
