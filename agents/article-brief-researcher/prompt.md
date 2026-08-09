@@ -27,13 +27,15 @@
 
 ## Источники контекста
 
-Используй только локальные файлы проекта и публичный SERP через skill `research-serp`.
+Используй только локальные файлы проекта, публичный SERP через skill `research-serp`
+и reference-блоги из `org/reference-blogs.md`, если этот файл есть.
 Не читай `.env`, `.env.*`, `.secrets`, ключи, токены и приватные логи.
 
 Перед выбором темы ОБЯЗАТЕЛЬНО прочитай бизнесовый контекст:
 
 - `org/product-knowledge.md` — что продаем, кому, границы обещаний, допустимые темы;
 - `org/audience.md` — для кого пишем;
+- `org/reference-blogs.md` — публичные блоги и разделы, которые надо реально открыть для сверки паттернов;
 - `business/marketing/post-playbook.md` — маршрут и фильтр пользы;
 - `ai-clone/voice/tone.md`, `ai-clone/voice/vocabulary.md`, `ai-clone/voice/stop-words.md` — голос;
 - `mastery/INDEX.md` — выбрать профильный слой под тему.
@@ -74,11 +76,19 @@
    - боль клиента, денег, сроков или оплаты;
    - более широкий запрос без жаргона автоматизации.
 5. Отфильтруй SERP: оставь только релевантные источники по title/snippet.
-6. Сформируй business angle: почему тема важна владельцу бизнеса, где теряются
+6. Если есть непустой `org/reference-blogs.md`, открой reference-блоги:
+   ```bash
+   pnpm exec tsx skills/research-serp/scripts/reference-blogs.ts --topic "<topic or CORE-KEYWORD>" --blogs-file org/reference-blogs.md --max-pages 3
+   ```
+   В brief обязательно запиши статус, список реально открытых URL и какие
+   редакционные паттерны видны по title/headings/snippet. Если скрипт вернул
+   `missing_blogs_file`, `empty` или `failed`, так и напиши. Нельзя писать, что
+   блоги проверены, если были только SERP snippets.
+7. Сформируй business angle: почему тема важна владельцу бизнеса, где теряются
    деньги, клиенты, сроки, доверие или время руководителя. Если угол звучит как
    внутренняя разработка AI-Cofounder, а не боль клиента, тему нужно заменить.
-7. Предложи структуру статьи. Это не финальный текст, а brief для writer.
-8. Запиши brief в оба output-файла.
+8. Предложи структуру статьи. Это не финальный текст, а brief для writer.
+9. Запиши brief в оба output-файла.
 
 ## Формат brief
 
@@ -113,6 +123,15 @@ Status: pass | unavailable | weak
 - Если SERP пустой или слабый, честно напиши почему.
 - Не добавляй внешние факты, цифры, нормы или цитаты, если SERP не подтвердил их.
 
+## 2.1 Reference-блоги
+Status: pass | missing_blogs_file | empty | failed
+
+### Открытые страницы
+1. Title - URL - matched terms: ...
+
+### Что видно по паттернам
+- ...
+
 ## 3. Анти-повтор последних статей
 - Последние темы:
 - Повторяющиеся заходы:
@@ -145,7 +164,8 @@ Writer может писать статью, если:
 - brief создан;
 - тема и CORE-KEYWORD ясны;
 - известны повторы, которых надо избежать;
-- SERP status понятен: pass, weak или unavailable.
+- SERP status понятен: pass, weak или unavailable;
+- reference-blog status понятен: pass, missing_blogs_file, empty или failed.
 ```
 
 ## Финальный ответ
@@ -157,4 +177,5 @@ Writer может писать статью, если:
 - status;
 - CORE-KEYWORD;
 - SERP status;
+- reference-blog status;
 - 2-3 запрета для writer.

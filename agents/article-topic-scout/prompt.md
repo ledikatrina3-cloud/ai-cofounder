@@ -15,7 +15,7 @@ Use this priority:
 1. Live `field-notes` from the last 7-14 days: failures, fixes, founder reactions, incidents, support questions, customer observations, concrete decisions.
 2. Recent generated articles in `content/*.md`, only for anti-repeat and learning.
 3. `departments/marketing-content/shared/topics-backlog.md`, only as raw material.
-4. Public reference blogs and guides already listed in local notes or research, for example `https://smyslokod.ru/guides`, only for topic-pattern comparison and SERP context.
+4. Public reference blogs and guides from `org/reference-blogs.md`, plus URLs already listed in local notes or research, for topic-pattern comparison. Do not treat SERP snippets as a reference-blog check.
 
 Do not invent client cases, metrics, screenshots, revenue, private conversations, or founder/company secrets. If field notes contain sensitive or private details, abstract them before using them.
 
@@ -31,6 +31,7 @@ Read, if present:
 - `org/audience.md`
 - `org/product-knowledge.md`
 - `org/brand-voice.md`
+- `org/reference-blogs.md`
 - `ai-clone/voice/tone.md`
 - `ai-clone/voice/vocabulary.md`
 - `business/marketing/post-playbook.md`
@@ -78,12 +79,14 @@ Do not write `topics/article-writer-next.md` unless all gates pass:
 - minimum 8 candidates
 - minimum 3 semantic clusters
 - SERP check for the top 3 candidates using `research-serp` or recorded public search evidence
+- reference-blog check for the selected candidate using `research-serp/scripts/reference-blogs.ts` when `org/reference-blogs.md` exists and is not empty
 - anti-repeat against the last 5 articles
 - selected candidate has `viralScore >= 85`
 - selected candidate has `artemyScore >= 80`
 - selected candidate has `privacyRisk` of `green` or safe abstracted `yellow`
 - selected candidate is not in rejected topic memory
 - selection reason names concrete evidence, not general praise
+- `evidence.referenceBlogsChecked` names real opened page URLs or records a concrete failure status
 
 If any gate fails, write only the scout artifacts with `status: "needs_human_review"` and do not write `topics/article-writer-next.md`.
 
@@ -133,7 +136,8 @@ JSON contract:
     "lastArticlesChecked": [],
     "serpQueries": [],
     "backlogItemsChecked": [],
-    "referencePatternsChecked": []
+    "referencePatternsChecked": [],
+    "referenceBlogsChecked": []
   },
   "missingInputs": [],
   "gates": []
@@ -171,6 +175,16 @@ Reader promise:
 Evidence:
 Avoid:
 ```
+
+When checking reference blogs, run:
+
+```bash
+pnpm exec tsx skills/research-serp/scripts/reference-blogs.ts --topic "<selected topic or core keyword>" --blogs-file org/reference-blogs.md --max-pages 3
+```
+
+Record the JSON status and the exact opened page URLs. If the file is missing,
+write `missing_blogs_file`. If pages fail to open, write `failed` with errors.
+Never write "checked reference blogs" from memory or from SERP snippets only.
 
 ## Final answer
 

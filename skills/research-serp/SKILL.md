@@ -1,7 +1,7 @@
 ---
 name: research-serp
-description: Ищет источники по теме через публичный DuckDuckGo SERP. Возвращает топ-10 ссылок с title и snippet. Не парсит контент страниц — только результаты поиска. Не использует платные API.
-version: 1.1.0
+description: Ищет источники по теме через публичный DuckDuckGo SERP и, если задан список reference-блогов, открывает их страницы для сверки редакционных паттернов. Не использует платные API.
+version: 1.2.0
 category: research
 displayName: SERP Researcher
 icon: 🔍
@@ -14,9 +14,10 @@ requiresScopes: []
 
 ## Когда использовать
 Когда тебе нужно собрать первичный research-пакет: список релевантных
-источников по теме. Дальше writer-агент будет цитировать эти источники.
+источников по теме и проверить reference-блоги, которые явно перечислены в
+локальном файле `org/reference-blogs.md`.
 
-НЕ используй для: глубокого парсинга контента (это отдельная задача),
+НЕ используй для: глубокого парсинга всего сайта,
 проверки одного факта (для этого один URL → одна выписка, не SERP).
 
 ## Алгоритм
@@ -52,7 +53,41 @@ requiresScopes: []
 5. **Если все попытки пустые**, запиши `SERP unavailable` и ошибки из JSON. Не
    добавляй внешние факты, цифры, нормы или цитаты. Для задач, где актуальные
    источники обязательны, остановись на gate вместо генерации готового текста.
-6. **Запиши итоговый research** как markdown в output путь (передаётся
+6. **Reference-blog check.** Если есть `org/reference-blogs.md`, открой
+   reference-блоги через скрипт:
+   ```
+   pnpm exec tsx skills/research-serp/scripts/reference-blogs.ts --topic "<topic>" --blogs-file org/reference-blogs.md --max-pages 3
+   ```
+   Скрипт возвращает JSON:
+   ```json
+   {
+     "topic": "...",
+     "blogsFile": "org/reference-blogs.md",
+     "status": "pass",
+     "blogs": [
+       {
+         "url": "https://example.com/guides",
+         "status": "pass",
+         "pages": [
+           {
+             "url": "https://example.com/guides",
+             "title": "...",
+             "description": "...",
+             "headings": ["..."],
+             "matchedTerms": ["..."],
+             "snippet": "..."
+           }
+         ],
+         "errors": []
+       }
+     ],
+     "errors": []
+   }
+   ```
+   PASS только если `status: "pass"` и хотя бы одна страница открыта. Если
+   файл отсутствует, пустой или сайт не открылся, честно запиши этот статус и
+   не утверждай, что reference-блоги проверены.
+7. **Запиши итоговый research** как markdown в output путь (передаётся
    routine'ой). Формат:
    ```markdown
    # Research: <topic>
@@ -65,6 +100,11 @@ requiresScopes: []
    ## Key facts (если уже видно из snippets)
    - ...
 
+   ## Reference blogs
+   Status: pass | missing_blogs_file | empty | failed
+   Pages opened:
+   1. [Title](url) — matched terms: ...
+
    ## Notes
    - ...
    ```
@@ -73,5 +113,6 @@ requiresScopes: []
 
 - DuckDuckGo может вернуть пусто или капчу; скрипт пробует запасные DDG endpoints,
   но если все они пустые, это попадёт в `errors` и не считается успешным research.
-- Скрипт не ходит на сами страницы (deep parsing — отдельный скилл).
+- Скрипт `reference-blogs.ts` ходит только на явно перечисленные публичные
+  HTTPS-страницы из `org/reference-blogs.md`, без cookies и без чтения секретов.
 - Без VPN/прокси — географическая привязка ограничивает выдачу.
