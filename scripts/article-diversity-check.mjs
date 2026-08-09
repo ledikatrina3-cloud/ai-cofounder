@@ -158,6 +158,16 @@ if (
   });
 }
 
+if (
+  candidate.categories.table_card_artifact &&
+  recent.filter((article) => article.categories.table_card_artifact).length >= 3
+) {
+  issues.push({
+    code: 'reused_table_card_artifact',
+    message: 'Recent posts already rely on a table/card/map/brief practical block. Use a different article form, not another table-like artifact.',
+  });
+}
+
 const result = {
   pass: issues.length === 0,
   candidate: {

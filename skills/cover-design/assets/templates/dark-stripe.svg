@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
-  <rect width="1200" height="630" fill="#141413"/>
-  <rect x="0" y="0" width="20" height="630" fill="#d97757"/>
+  <rect width="1200" height="630" fill="#17120F"/>
+  <rect x="0" y="0" width="20" height="630" fill="#C7A27A"/>
   <foreignObject x="80" y="180" width="1040" height="280">
-    <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, system-ui, sans-serif; color: #ede9e3; font-size: 60px; line-height: 1.18; font-weight: 700; word-wrap: break-word;">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Manrope, -apple-system, system-ui, sans-serif; color: #F4EFEA; font-size: 60px; line-height: 1.18; font-weight: 700; word-wrap: break-word; letter-spacing: 0;">
       {{TITLE}}
     </div>
   </foreignObject>

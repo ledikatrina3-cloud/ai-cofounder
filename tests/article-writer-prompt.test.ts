@@ -137,4 +137,16 @@ describe('article-writer prompt audience framing', () => {
     expect(skill).toContain('tools/article-writing/ai-cadence-check.py');
     expect(skill).toContain('content/<slug>.checklist.md');
   });
+
+  it('requires shorter livelier drafts and a human-speech editorial pass', () => {
+    for (const promptVariant of promptVariants) {
+      expect(promptVariant).toContain('Целевой объём **8-12K символов**');
+      expect(promptVariant).toContain('Обычно 4-5 H2');
+      expect(promptVariant).toContain('человек так говорит?');
+      expect(promptVariant).toContain('спокойные строки лежат рядом со спорными');
+      expect(promptVariant).toContain('нужен человек');
+      expect(promptVariant).toContain('Нельзя имитировать ее авторский голос');
+    }
+  });
+
 });

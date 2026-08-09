@@ -222,14 +222,48 @@ describe('cover templates', () => {
     }
   });
 
-  it('dark-stripe использует брендовые цвета вместо старой blue/orange палитры', async () => {
+  it('dark-stripe использует брендовые цвета AI-Clone', async () => {
     const content = await readFile(new URL('dark-stripe.svg', templatesDir), 'utf8');
 
-    expect(content).toContain('#141413');
-    expect(content).toContain('#d97757');
-    expect(content).toContain('#ede9e3');
-    expect(content).not.toContain('#0F172A');
-    expect(content).not.toContain('#F59E0B');
-    expect(content).not.toContain('#F8FAFC');
+    expect(content).toContain('#17120F');
+    expect(content).toContain('#C7A27A');
+    expect(content).toContain('#F4EFEA');
+    expect(content).not.toContain('#141413');
+    expect(content).not.toContain('#d97757');
+    expect(content).not.toContain('#ede9e3');
+  });
+
+  it('все шаблоны остаются в брендовой палитре без белого и AI SaaS цветов', async () => {
+    const files = await readdir(templatesDir);
+    const svgFiles = files.filter((file) => file.endsWith('.svg'));
+    const forbidden = [
+      '#FFFFFF',
+      '#F1F5F9',
+      '#0F172A',
+      '#475569',
+      '#6D28D9',
+      '#1E40AF',
+      '#6366F1',
+      '#10B981',
+      '#DC2626',
+      '#d97757',
+      '#ede9e3',
+      '#141413',
+      'Georgia',
+      'Times New Roman',
+      'LONG READ',
+      'AI-Cofounder',
+      'МАНИФЕСТ',
+    ];
+
+    for (const file of svgFiles) {
+      const content = await readFile(new URL(file, templatesDir), 'utf8');
+      expect(content, file).toContain('#17120F');
+      expect(content, file).toContain('#C7A27A');
+      expect(content, file).toContain('#F4EFEA');
+      for (const token of forbidden) {
+        expect(content, `${file} contains ${token}`).not.toContain(token);
+      }
+    }
   });
 });

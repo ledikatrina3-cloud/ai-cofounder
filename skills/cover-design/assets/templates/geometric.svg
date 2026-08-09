@@ -1,12 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
-  <rect width="1200" height="630" fill="#F1F5F9"/>
-  <circle cx="1080" cy="120" r="180" fill="#10B981" opacity="0.18"/>
-  <circle cx="1100" cy="540" r="120" fill="#6366F1" opacity="0.18"/>
-  <polygon points="0,500 200,300 400,500" fill="#F59E0B" opacity="0.15"/>
-  <foreignObject x="80" y="200" width="900" height="280">
-    <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, system-ui, sans-serif; color: #0F172A; font-size: 56px; line-height: 1.2; font-weight: 700; word-wrap: break-word;">
+  <rect width="1200" height="630" fill="#17120F"/>
+  <rect x="0" y="0" width="20" height="630" fill="#C7A27A"/>
+  <circle cx="1050" cy="140" r="180" fill="#241C18" opacity="0.72"/>
+  <circle cx="1110" cy="520" r="120" fill="#3A302A" opacity="0.56"/>
+  <polygon points="760,630 1040,350 1200,630" fill="#C7A27A" opacity="0.12"/>
+  <foreignObject x="80" y="185" width="900" height="280">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Manrope, -apple-system, system-ui, sans-serif; color: #F4EFEA; font-size: 58px; line-height: 1.18; font-weight: 700; word-wrap: break-word; letter-spacing: 0;">
       {{TITLE}}
     </div>
   </foreignObject>
-  <text x="80" y="560" fill="#475569" font-family="-apple-system, system-ui, sans-serif" font-size="20" font-weight="500">analysis · data · insight</text>
 </svg>
