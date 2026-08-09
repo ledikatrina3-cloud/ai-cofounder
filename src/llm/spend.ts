@@ -21,7 +21,7 @@ export interface SpendRecordInput {
   // Транспорт, через который шёл вызов: 'oauth' (gateway/claude CLI,
   // биллинг по подписке, usd=0) или 'apikey' (per-token биллинг). Опционально:
   // legacy-записи без транспорта продолжают валидно парситься. См. src/llm/transport.ts.
-  transport?: 'oauth' | 'apikey';
+  transport?: 'oauth' | 'apikey' | 'codex';
 }
 
 export interface CurrentSpend {
@@ -53,7 +53,7 @@ interface SpendProperties {
   pricingAsOf: number;
   routineId?: string;
   // Метка транспорта для retrospective-аналитики. См. src/llm/transport.ts.
-  transport?: 'oauth' | 'apikey';
+  transport?: 'oauth' | 'apikey' | 'codex';
 }
 
 export async function recordSpend(
@@ -139,10 +139,11 @@ export async function computeCurrentSpend(
 }
 
 async function getCycleStart(db: PrismaClient): Promise<number> {
-  // Цикл = период с момента последнего `event.trigger` (см. plans/, фаза 1.4).
-  // До появления event.trigger (фаза 1.4 ещё не сделана) per-cycle = весь spend за всю историю.
+  // Цикл = период с момента последнего триггера. Исторически это был
+  // `event.trigger`, а routine-runner пишет `event.routine.trigger`.
+  // Оба типа открывают новое per-cycle окно бюджета.
   const rows = await db.$queryRawUnsafe<{ createdAt: number }[]>(
-    `SELECT createdAt FROM "Record" WHERE type = 'event.trigger' ORDER BY createdAt DESC LIMIT 1`,
+    `SELECT createdAt FROM "Record" WHERE type IN ('event.trigger', 'event.routine.trigger') ORDER BY createdAt DESC LIMIT 1`,
   );
   const top = rows[0];
   return top ? Number(top.createdAt) : 0;

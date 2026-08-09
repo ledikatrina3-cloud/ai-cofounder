@@ -1,0 +1,7 @@
+secrets: []
+tools:
+  - project.read
+  - project.grep
+  - project.glob
+  - project.bash
+  - report.send

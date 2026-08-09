@@ -151,3 +151,6 @@ outputs/
 /marketplace*.png
 /nav-*.png
 /seo-*.png
+
+# Local server secrets
+.secrets/

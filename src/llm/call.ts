@@ -21,7 +21,7 @@ import {
   recordBudgetDeny,
   recordSpend,
 } from './spend.js';
-import { type TransportConfig, getTransport } from './transport.js';
+import { type TransportConfig, TransportConfigError, getTransport } from './transport.js';
 
 export interface CallMessage {
   role: 'user' | 'assistant';
@@ -143,6 +143,11 @@ export async function call(opts: CallOptions, db: PrismaClient = getPrisma()): P
   loadEnv();
 
   const transport = getTransport();
+  if (transport.mode === 'codex') {
+    throw new TransportConfigError(
+      'LLM_TRANSPORT=codex ???????????? agent/routine-??????? ????? Codex CLI. ?????? Messages API call() ??? triage/structured-output ???? ??????? apikey ??? oauth gateway.',
+    );
+  }
   const limits = opts.limitsOverride ?? (await loadBudgetLimits());
   const current = await computeCurrentSpend(db);
   await guardOrDeny(current, limits, opts, db);

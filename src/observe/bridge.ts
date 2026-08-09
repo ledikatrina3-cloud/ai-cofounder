@@ -372,7 +372,7 @@ export interface RoutineStartEvent extends BridgeEventBase {
   type: 'routine.start';
   routineId: string;
   runDate: string; // 'YYYY-MM-DD'
-  trigger: { source: 'cron' | 'manual'; idempotencyKey: string };
+  trigger: { source: 'cron' | 'manual' | 'signal'; idempotencyKey: string };
 }
 
 export interface RoutineEndEvent extends BridgeEventBase {
@@ -384,6 +384,14 @@ export interface RoutineEndEvent extends BridgeEventBase {
   // 'project-not-found') или 'failed' (краткий human-readable).
   reason?: string;
   durationMs: number;
+}
+
+export interface RoutineSignalEvent extends BridgeEventBase {
+  type: 'routine.signal';
+  sourceRoutineId: string;
+  targetRoutineId: string;
+  runDate: string;
+  idempotencyKey: string;
 }
 
 // Skills (Фаза 2 плана 2026-05-21-skills-architecture-v3). Аддитивное
@@ -528,6 +536,7 @@ export type BridgeEvent =
   | RunIterationEndEvent
   | RoutineStartEvent
   | RoutineEndEvent
+  | RoutineSignalEvent
   | SkillLoadedEvent
   | SkillActionStartEvent
   | SkillActionEndEvent
@@ -636,6 +645,10 @@ export type BridgeEventInput =
       source?: BridgeEventSource;
     })
   | (Omit<RoutineEndEvent, 'ts' | 'source'> & {
+      ts?: number;
+      source?: BridgeEventSource;
+    })
+  | (Omit<RoutineSignalEvent, 'ts' | 'source'> & {
       ts?: number;
       source?: BridgeEventSource;
     })

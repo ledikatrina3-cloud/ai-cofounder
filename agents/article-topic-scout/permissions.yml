@@ -1,0 +1,16 @@
+tools:
+  - project.read
+  - project.grep
+  - project.glob
+  - project.bash
+  - report.send
+
+bash:
+  - mkdir
+  - cat
+  - mv
+  - cp
+  - ls
+  - find
+
+secrets: []

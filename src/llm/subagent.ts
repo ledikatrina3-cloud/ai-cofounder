@@ -147,15 +147,19 @@ export async function runSubagent(
 ): Promise<SubagentRunResult> {
   loadEnv();
 
-  // В oauth-режиме (см. src/llm/transport.ts) sub-agent идёт через `claude` CLI subprocess
-  // — нативный путь биллинга через подписку. Контракт SubagentRunResult
-  // идентичен, поэтому caller'ы (investigate/run.ts, solve/) не меняются.
-  // Если caller передал `queryImpl` (тест), уважаем DI и не уходим в CLI.
-  if (getTransport().mode === 'oauth' && opts.queryImpl === undefined) {
-    // Импортируем лениво, чтобы не тащить child_process в Agent-SDK-путь,
-    // и чтобы избежать circular import (subagent-cli импортирует тип отсюда).
-    const { runSubagentViaCli } = await import('./subagent-cli.js');
-    return runSubagentViaCli(opts, db);
+  // CLI transports run through subprocess adapters. The public
+  // SubagentRunResult contract stays the same for routines/investigate/solve.
+  // Test DI via queryImpl keeps using the SDK path.
+  const transport = getTransport();
+  if (opts.queryImpl === undefined) {
+    if (transport.mode === 'oauth') {
+      const { runSubagentViaCli } = await import('./subagent-cli.js');
+      return runSubagentViaCli(opts, db);
+    }
+    if (transport.mode === 'codex') {
+      const { runSubagentViaCodex } = await import('./subagent-codex.js');
+      return runSubagentViaCodex(opts, db);
+    }
   }
 
   const limits = opts.limitsOverride ?? (await loadBudgetLimits());
@@ -362,7 +366,7 @@ export function emitFromSDKMessage(
       } else if (b.type === 'text' && typeof b.text === 'string') {
         const text = b.text.trim();
         if (text.length > 0) {
-          void emit({ type: 'assistant.message', text: text.slice(0, 500) });
+          void emit({ type: 'assistant.message', text });
           if (thinking !== undefined) {
             thinking.buffer.value =
               (thinking.buffer.value.length > 0 ? `${thinking.buffer.value} ` : '') + text;
