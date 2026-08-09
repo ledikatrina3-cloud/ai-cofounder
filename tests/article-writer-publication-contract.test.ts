@@ -23,6 +23,15 @@ describe('article writer mastery and publication contract', () => {
     }
   });
 
+  it('requires Ledohovsky writing mastery before the first full draft', () => {
+    for (const contract of [prompt, skill, rules]) {
+      expect(contract).toContain('mastery/copywriting/INDEX.md');
+      expect(contract).toContain('mastery/copywriting/igor-ledohovsky.md');
+      expect(contract).toMatch(/до (первого полного )?(драфта|черновика)/i);
+      expect(contract).toMatch(/примен[её]н[^\n]*метод/i);
+    }
+  });
+
   it('allows article links only from the website publication registry', () => {
     for (const contract of [prompt, skill, rules]) {
       expect(contract).toContain('content/published-articles.json');
