@@ -32,6 +32,14 @@ describe('article writer mastery and publication contract', () => {
     }
   });
 
+  it('requires natural business language instead of decorative metaphors', () => {
+    for (const contract of [prompt, skill, rules]) {
+      expect(contract).toContain('рабочей встрече');
+      expect(contract).toContain('самая частая жалоба');
+      expect(contract).toMatch(/метафор/i);
+    }
+  });
+
   it('allows article links only from the website publication registry', () => {
     for (const contract of [prompt, skill, rules]) {
       expect(contract).toContain('content/published-articles.json');
