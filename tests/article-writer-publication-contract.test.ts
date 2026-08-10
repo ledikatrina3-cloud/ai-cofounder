@@ -40,6 +40,18 @@ describe('article writer mastery and publication contract', () => {
     }
   });
 
+  it('keeps the selected Muzhitskaya-inspired techniques in every article QA', () => {
+    for (const contract of [prompt, skill, rules]) {
+      expect(contract).toContain('Татьяны Мужицкой');
+      expect(contract).toMatch(/кажд[а-яё]* стать/i);
+      expect(contract).toMatch(/бытов[а-яё]* сцен/i);
+      expect(contract).toMatch(/мягк[а-яё]* самоирон/i);
+      expect(contract).toMatch(/QA/i);
+      expect(contract).toMatch(/не (имитир|копир)/i);
+    }
+    expect(prompt).not.toContain('Для одной пробной статьи');
+  });
+
   it('allows article links only from the website publication registry', () => {
     for (const contract of [prompt, skill, rules]) {
       expect(contract).toContain('content/published-articles.json');
@@ -50,7 +62,9 @@ describe('article writer mastery and publication contract', () => {
   });
 
   it('starts with an empty publication registry', () => {
-    const registry = JSON.parse(read('content/published-articles.json')) as { articles?: unknown[] };
+    const registry = JSON.parse(read('content/published-articles.json')) as {
+      articles?: unknown[];
+    };
     expect(registry).toEqual({ articles: [] });
   });
 

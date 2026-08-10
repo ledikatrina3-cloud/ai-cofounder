@@ -75,6 +75,8 @@ interface RoutineDetailDrawerProps {
 }
 
 const BRIDGE_URL = 'http://127.0.0.1:3737';
+const DETAIL_REFRESH_MS = 5000;
+const BRIEF_REFRESH_MS = 5000;
 
 const PALETTE = ['#d97757', '#7c9eb2', '#c4a747', '#9ca77c', '#7cb29a', '#a77c9c', '#b25555'];
 function colorFromId(id: string): string {
@@ -388,10 +390,11 @@ export function RoutineDetailDrawer({
       return;
     }
     let cancelled = false;
-    setLoading(true);
+    let firstLoad = true;
     setData(null);
     setSkills([]);
-    (async (): Promise<void> => {
+    const load = async (): Promise<void> => {
+      if (firstLoad) setLoading(true);
       const detailPromise = fetch(`${BRIDGE_URL}/routines/${encodeURIComponent(routineId)}`)
         .then((res) => res.json() as Promise<DetailResponse>)
         .catch(
@@ -410,10 +413,18 @@ export function RoutineDetailDrawer({
       if (skillsBody.ok && Array.isArray(skillsBody.skills)) {
         setSkills(skillsBody.skills);
       }
-      setLoading(false);
-    })();
+      if (firstLoad) {
+        setLoading(false);
+        firstLoad = false;
+      }
+    };
+    void load();
+    const detailInterval = window.setInterval(() => {
+      void load();
+    }, DETAIL_REFRESH_MS);
     return () => {
       cancelled = true;
+      window.clearInterval(detailInterval);
     };
   }, [routineId]);
 
@@ -928,9 +939,11 @@ function ArticleBriefReviewPanel({ accentColor }: { accentColor: string }): Reac
   const [message, setMessage] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState('');
 
-  const loadBrief = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    setMessage(null);
+  const loadBrief = useCallback(async (showLoading = true): Promise<void> => {
+    if (showLoading) {
+      setLoading(true);
+      setMessage(null);
+    }
     try {
       const res = await fetch(`${BRIDGE_URL}/content/briefs/latest`);
       const body = (await res.json().catch(() => null)) as ArticleBriefResponse | null;
@@ -938,12 +951,16 @@ function ArticleBriefReviewPanel({ accentColor }: { accentColor: string }): Reac
     } catch (err) {
       setBrief({ ok: false, error: err instanceof Error ? err.message : String(err) });
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void loadBrief();
+    const briefInterval = window.setInterval(() => {
+      void loadBrief(false);
+    }, BRIEF_REFRESH_MS);
+    return () => window.clearInterval(briefInterval);
   }, [loadBrief]);
 
   const runWriter = useCallback(async (): Promise<void> => {
@@ -1172,7 +1189,9 @@ function ArticleBriefReviewPanel({ accentColor }: { accentColor: string }): Reac
               </button>
               <button
                 type="button"
-                onClick={loadBrief}
+                onClick={() => {
+                  void loadBrief();
+                }}
                 disabled={busy}
                 style={{
                   padding: '9px 10px',
