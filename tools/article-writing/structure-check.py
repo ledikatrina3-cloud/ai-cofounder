@@ -8,11 +8,12 @@ structure-check.py - механическая проверка структур�
 
   1. Ровно один H1 (# ) - заголовок страницы.
   2. У каждого H2 (## ) есть контент до следующего H2 (нет пустых разделов).
-  3. Есть раздел «Источники» / «Sources» (доверие + SEO).
+  3. Раздел «Источники» / «Sources» требуется только при
+     tools.structure.require_sources=true.
   4. Если cta.url задан - есть ссылка на оффер. Если не задан - не требуем
      внешнюю CTA-ссылку.
   5. У всех картинок ![alt](url) непустой alt (доступность + SEO).
-  6. Минимум внутренних ссылок (tools.structure.min_internal_links, дефолт 1).
+  6. Минимум внутренних ссылок (tools.structure.min_internal_links, дефолт 0).
 
 Это советующая проверка структуры, а не смысла. Финальное решение - за человеком.
 
@@ -60,8 +61,11 @@ def check_structure(text, cfg):
     if not h2_idx:
         issues.append("нет ни одного H2 (## ) - статья без структуры разделов")
 
-    # 3. Раздел источников
-    if not re.search(r"^#{2,3}\s+(источник|sources)", body, re.I | re.M):
+    # 3. Раздел источников. По умолчанию публичный evidence не требуется.
+    require_sources = str(get(cfg, "tools.structure.require_sources", False)).lower() in (
+        "1", "true", "yes", "on"
+    )
+    if require_sources and not re.search(r"^#{2,3}\s+(источник|sources)", body, re.I | re.M):
         issues.append("нет раздела «Источники» / «Sources»")
 
     # 4. CTA на оффер
@@ -75,7 +79,7 @@ def check_structure(text, cfg):
             issues.append(f"картинка без alt-текста: ({m.group(2)[:50]})")
 
     # 6. Внутренние ссылки
-    min_internal = int(get(cfg, "tools.structure.min_internal_links", 1))
+    min_internal = int(get(cfg, "tools.structure.min_internal_links", 0))
     domain = get(cfg, "project.domain", "")
     content_path = get(cfg, "project.content_path", "")
     internal = 0
