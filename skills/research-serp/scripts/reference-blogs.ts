@@ -161,6 +161,20 @@ export function parseBlogList(markdown: string): string[] {
   return urls;
 }
 
+export function normalizeReferenceUrl(rawUrl: string): string {
+  const url = new URL(rawUrl);
+  if (url.hostname.toLowerCase() === 't.me') {
+    const parts = url.pathname.split('/').filter(Boolean);
+    const channel = parts[0] === 's' ? parts[1] : parts[0];
+    if (channel !== undefined && channel !== '') {
+      url.pathname = `/s/${channel}`;
+      url.search = '';
+      url.hash = '';
+    }
+  }
+  return url.toString().replace(/\/$/, '');
+}
+
 function isPrivateHostname(hostname: string): boolean {
   const host = hostname.toLowerCase();
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
@@ -197,7 +211,7 @@ export function validateReferenceUrl(
     if (url.protocol !== 'https:') return { ok: false, error: 'reference URL must be https' };
     if (isPrivateHostname(url.hostname))
       return { ok: false, error: 'reference URL points to private host' };
-    return { ok: true, url };
+    return { ok: true, url: new URL(normalizeReferenceUrl(url.toString())) };
   } catch {
     return { ok: false, error: 'invalid reference URL' };
   }
@@ -252,6 +266,22 @@ function extractHeadings(html: string): string[] {
   return headings;
 }
 
+function extractTelegramPostHeadings(html: string): string[] {
+  const results: string[] = [];
+  const re =
+    /<div\b[^>]*class\s*=\s*(["'])[^"']*\btgme_widget_message_text\b[^"']*\1[^>]*>([\s\S]*?)<\/div>/gi;
+  let match: RegExpExecArray | null;
+  // biome-ignore lint/suspicious/noAssignInExpressions: classic regex iterate loop
+  while ((match = re.exec(html)) !== null) {
+    const lines = (match[2] ?? '')
+      .split(/<br\s*\/?\s*>/i)
+      .map(cleanText)
+      .filter((line) => line.length >= 4);
+    results.push(...lines);
+  }
+  return [...new Set(results)];
+}
+
 function extractVisibleText(html: string): string {
   return cleanText(
     html
@@ -300,7 +330,9 @@ export function extractPageSummary(url: string, html: string, terms: string[]): 
   const visibleText = extractVisibleText(html);
   const title = extractTitle(html);
   const description = extractDescription(html);
-  const headings = extractHeadings(html);
+  const headings = url.startsWith('https://t.me/s/')
+    ? extractTelegramPostHeadings(html)
+    : extractHeadings(html);
   const snippetSource = description !== '' ? description : visibleText;
   const summaryText = `${title} ${description} ${headings.join(' ')} ${visibleText}`;
 

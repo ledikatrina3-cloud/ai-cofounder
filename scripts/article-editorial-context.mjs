@@ -5,19 +5,215 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 const args = process.argv.slice(2);
 const candidateArg = args.find((arg) => !arg.startsWith('--'));
 
-if (!candidateArg) {
-  console.error(
-    'Usage: node scripts/article-editorial-context.mjs content/<slug>.md [--content-dir content] [--recent 5]',
-  );
-  process.exit(2);
-}
-
 function readOption(name, fallback) {
   const inline = args.find((arg) => arg.startsWith(`${name}=`));
   if (inline) return inline.slice(name.length + 1);
 
   const index = args.indexOf(name);
   return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
+}
+
+function normalizedReferenceUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (url.hostname.toLowerCase() === 't.me') {
+      const parts = url.pathname.split('/').filter(Boolean);
+      const channel = parts[0] === 's' ? parts[1] : parts[0];
+      if (channel) {
+        url.pathname = `/s/${channel}`;
+        url.search = '';
+        url.hash = '';
+      }
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return rawUrl;
+  }
+}
+
+function registryUrls(markdown) {
+  return [...markdown.matchAll(/^\|\s*(https:\/\/[^|\s]+)\s*\|/gm)].map((match) =>
+    normalizedReferenceUrl(match[1]),
+  );
+}
+
+const genericValues = new Set([
+  'прочитано',
+  'применено',
+  'прочитано/применено',
+  'готово',
+  'не применено',
+  'использовано',
+]);
+
+function validateTextField(issues, value, path) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    issues.push({ code: 'field_required', path, message: `${path} must be a non-empty string.` });
+    return;
+  }
+  if (genericValues.has(normalize(value))) {
+    issues.push({
+      code: 'field_too_generic',
+      path,
+      message: `${path} must describe concrete evidence, not a completion marker.`,
+    });
+  }
+}
+
+function validateMasterySource(issues, value, path) {
+  validateTextField(issues, value, path);
+  if (typeof value !== 'string' || !/^mastery\/.+\.md$/i.test(value.replace(/\\/g, '/'))) {
+    issues.push({
+      code: 'mastery_source_invalid',
+      path,
+      message: `${path} must point to a Markdown file under mastery/.`,
+    });
+  }
+}
+
+export function validateEditorialEvidence(evidence, enabledReferenceUrls) {
+  const issues = [];
+  const references = Array.isArray(evidence?.references) ? evidence.references : [];
+  const expected = enabledReferenceUrls.map(normalizedReferenceUrl);
+  const attempts = new Map();
+
+  for (const [index, item] of references.entries()) {
+    const path = `references[${index}]`;
+    validateTextField(issues, item?.url, `${path}.url`);
+    const url = normalizedReferenceUrl(item?.url ?? '');
+    attempts.set(url, (attempts.get(url) ?? 0) + 1);
+    if (item?.status !== 'opened' && item?.status !== 'failed') {
+      issues.push({
+        code: 'reference_status_invalid',
+        path: `${path}.status`,
+        message: 'status must be opened or failed.',
+      });
+    }
+    if (item?.status === 'opened') {
+      const before = issues.length;
+      validateTextField(issues, item?.observed_pattern, `${path}.observed_pattern`);
+      if (
+        issues.length > before &&
+        (typeof item?.observed_pattern !== 'string' || item.observed_pattern.trim() === '')
+      ) {
+        issues.push({
+          code: 'reference_observed_pattern_required',
+          path: `${path}.observed_pattern`,
+          message: 'Opened references require an observed pattern.',
+        });
+      }
+    }
+    validateTextField(issues, item?.article_decision, `${path}.article_decision`);
+    validateTextField(issues, item?.accessed_at, `${path}.accessed_at`);
+    if (typeof item?.accessed_at === 'string' && !Number.isFinite(Date.parse(item.accessed_at))) {
+      issues.push({
+        code: 'reference_accessed_at_invalid',
+        path: `${path}.accessed_at`,
+        message: 'accessed_at must be an ISO date.',
+      });
+    }
+  }
+
+  for (const url of expected) {
+    const count = attempts.get(url) ?? 0;
+    if (count === 0)
+      issues.push({
+        code: 'reference_missing_attempt',
+        url,
+        message: `No attempt recorded for ${url}.`,
+      });
+    if (count > 1)
+      issues.push({
+        code: 'reference_duplicate_attempt',
+        url,
+        message: `More than one attempt recorded for ${url}.`,
+      });
+  }
+  for (const [url, count] of attempts) {
+    if (!expected.includes(url))
+      issues.push({
+        code: 'reference_not_enabled',
+        url,
+        message: `${url} is not enabled in the registry.`,
+      });
+    if (count > 1 && !expected.includes(url))
+      issues.push({
+        code: 'reference_duplicate_attempt',
+        url,
+        message: `More than one attempt recorded for ${url}.`,
+      });
+  }
+
+  const preDraft = Array.isArray(evidence?.mastery?.pre_draft) ? evidence.mastery.pre_draft : [];
+  if (preDraft.length === 0)
+    issues.push({
+      code: 'mastery_pre_draft_required',
+      path: 'mastery.pre_draft',
+      message: 'At least one pre-draft mastery decision is required.',
+    });
+  for (const [index, item] of preDraft.entries()) {
+    const path = `mastery.pre_draft[${index}]`;
+    validateMasterySource(issues, item?.source, `${path}.source`);
+    for (const field of ['method', 'problem', 'location', 'rejected_alternative']) {
+      validateTextField(issues, item?.[field], `${path}.${field}`);
+    }
+  }
+
+  const postDraft = Array.isArray(evidence?.mastery?.post_draft) ? evidence.mastery.post_draft : [];
+  if (postDraft.length === 0)
+    issues.push({
+      code: 'mastery_post_draft_required',
+      path: 'mastery.post_draft',
+      message: 'At least one post-draft mastery edit is required.',
+    });
+  for (const [index, item] of postDraft.entries()) {
+    const path = `mastery.post_draft[${index}]`;
+    validateMasterySource(issues, item?.source, `${path}.source`);
+    for (const field of ['method', 'before', 'after', 'reason']) {
+      validateTextField(issues, item?.[field], `${path}.${field}`);
+    }
+    if (
+      typeof item?.before === 'string' &&
+      normalize(item.before) === normalize(item?.after ?? '')
+    ) {
+      issues.push({
+        code: 'mastery_edit_unchanged',
+        path,
+        message: 'before and after must describe an actual edit.',
+      });
+    }
+  }
+
+  return { pass: issues.length === 0, issues };
+}
+
+const evidencePathArg = readOption('--validate-evidence', null);
+if (evidencePathArg) {
+  const registryPath = resolve(readOption('--registry', 'org/reference-blogs.md'));
+  let result;
+  try {
+    const evidence = JSON.parse(readFileSync(resolve(evidencePathArg), 'utf8'));
+    result = validateEditorialEvidence(evidence, registryUrls(readFileSync(registryPath, 'utf8')));
+  } catch (error) {
+    result = {
+      pass: false,
+      issues: [
+        {
+          code: 'evidence_read_failed',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
+  console.log(JSON.stringify(result, null, 2));
+  process.exit(result.pass ? 0 : 1);
+}
+
+if (!candidateArg) {
+  console.error(
+    'Usage: node scripts/article-editorial-context.mjs content/<slug>.md [--content-dir content] [--recent 5] or --validate-evidence evidence.json [--registry org/reference-blogs.md]',
+  );
+  process.exit(2);
 }
 
 const candidatePath = resolve(candidateArg);
