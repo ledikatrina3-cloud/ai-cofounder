@@ -144,3 +144,17 @@
 - repeated H1/H2/composition fixtures fail deterministically;
 - independent editor cannot self-certify with empty `PASS`;
 - three trial articles await human acceptance before declaring voice complete.
+
+## Execution status - 2026-08-11
+
+- Tasks 1-6 implemented and committed through `823c0a4`.
+- Focused editorial suite: 46/46 tests passed on the VPS test copy.
+- Project typecheck passed.
+- Full suite: 951 passed, 4 skipped; the git-layout test also passed after the
+  temporary source copy was initialized with its expected git metadata.
+- Prisma generation and Vite production build passed. The aggregate `pnpm build`
+  remains blocked at the initial Biome step by 12 pre-existing formatting errors
+  outside this refactor.
+- Task 7 trial articles, human voice acceptance and production deployment remain
+  pending. They require deploying this branch and explicit approval for a real
+  writer run; the voice gate must not be declared complete before that review.
