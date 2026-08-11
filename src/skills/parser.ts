@@ -75,7 +75,7 @@ interface FrontmatterAndBody {
 }
 
 function splitFrontmatterAndBody(skillId: string, source: string): FrontmatterAndBody {
-  const lines = source.split('\n');
+  const lines = source.split(/\r?\n/);
   if (lines[0]?.trim() !== FRONTMATTER_DELIM) {
     throw new SkillParseError(
       skillId,
@@ -542,7 +542,7 @@ function parsePermissions(skillId: string, name: string, source: string): SkillP
   // Эмулируем frontmatter: оборачиваем содержимое в `---\n...\n---\n`,
   // чтобы переиспользовать тот же парсер. Это даёт единый формат и
   // одинаковые ошибки.
-  const lines = source.split('\n');
+  const lines = source.split(/\r?\n/);
   // Сразу даём осмысленную ошибку на YAML block-array (часто пишут с дефиса).
   for (const line of lines) {
     if (/^\s*-\s+/.test(line)) {
