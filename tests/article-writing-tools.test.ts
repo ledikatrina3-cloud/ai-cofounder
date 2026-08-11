@@ -11,8 +11,8 @@ function writeArticle(body: string) {
   return file;
 }
 
-function runStructureCheck(file: string) {
-  return spawnSync('python3', ['tools/article-writing/structure-check.py', file], {
+function runStructureCheck(file: string, config?: string) {
+  return spawnSync('python3', ['tools/article-writing/structure-check.py', file, ...(config ? ['--config', config] : [])], {
     cwd: process.cwd(),
     encoding: 'utf8',
   });
@@ -46,7 +46,7 @@ describe('article-writing transferred tools', () => {
     expect(result.stdout).toContain('OK');
   });
 
-  it('still flags missing source sections', () => {
+  it('does not require public sources or invented internal links by default', () => {
     const candidate = writeArticle(
       [
         '# Заявки теряются до первого ответа',
@@ -65,7 +65,24 @@ describe('article-writing transferred tools', () => {
 
     const result = runStructureCheck(candidate);
 
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('OK');
+  });
+
+  it('can require source sections and internal links through config', () => {
+    const candidate = writeArticle(
+      ['# Заголовок', '', '## Раздел', '', 'Содержимое раздела.'].join('\n'),
+    );
+    const config = join(candidate, '..', 'config.yaml');
+    writeFileSync(
+      config,
+      ['tools:', '  structure:', '    require_sources: true', '    min_internal_links: 1'].join('\n'),
+    );
+
+    const result = runStructureCheck(candidate, config);
+
     expect(result.status).not.toBe(0);
     expect(result.stdout).toContain('нет раздела');
+    expect(result.stdout).toContain('внутренних ссылок 0, минимум 1');
   });
 });
