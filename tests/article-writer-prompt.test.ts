@@ -45,6 +45,12 @@ describe('article writer orchestration contract', () => {
     expect(runtimePrompt).toMatch(/draft[\s\S]+Artifacts:/i);
   });
 
+  it('treats ready as handoff to the founder, not publication approval', () => {
+    expect(runtimePrompt).toMatch(/status: ready[\s\S]+личный кабинет/i);
+    expect(runtimePrompt).toMatch(/ready[\s\S]+человеческ(?:ой|ую) проверк/i);
+    expect(runtimePrompt).toMatch(/повторном `revise`[\s\S]+не блокирует передачу/i);
+  });
+
   it('keeps business framing and research fallback in orchestration', () => {
     expect(runtimePrompt).toContain('умного владельца бизнеса без технического бэкграунда');
     expect(runtimePrompt).toContain('SERP unavailable');
