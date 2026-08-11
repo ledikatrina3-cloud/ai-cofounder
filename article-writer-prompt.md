@@ -102,3 +102,23 @@ node scripts/article-editorial-context.mjs content/<slug>.md --content-dir conte
 3. Проверь ссылочный и публикационный контракт из `rules.md`.
 4. Закрой только подтвержденные пункты `content/<slug>.checklist.md`.
 5. Готово только при отсутствии `[ ]`, успешных hard gates и наличии файлов.
+
+## 7. Отчет и файлы в Telegram
+
+Dispatcher автоматически отправляет итоговый ответ в Telegram и прикладывает
+существующие файлы, перечисленные в блоке `Artifacts:`. Поэтому завершай каждый
+успешно отработавший запуск коротким отчетом со статусом `ready` или `draft`, а
+в самом конце обязательно добавляй этот блок:
+
+```text
+Artifacts:
+article: content/<slug>.md
+html: content/<slug>.html
+cover: content/<slug>-cover.png
+cover: content/<slug>-cover.svg
+```
+
+Указывай только реально созданные файлы. Если PNG или SVG отсутствует, не
+добавляй соответствующую строку. Даже при статусе `draft` перечисли созданные
+Markdown, HTML и обложки, чтобы фаундер получил материалы для проверки. Не
+включай сюда research, QA, checklist, временные файлы и промежуточные черновики.

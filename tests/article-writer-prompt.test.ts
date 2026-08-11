@@ -36,6 +36,15 @@ describe('article writer orchestration contract', () => {
     }
   });
 
+  it('requires Telegram attachment paths in every completion report', () => {
+    expect(runtimePrompt).toContain('Artifacts:');
+    expect(runtimePrompt).toContain('article: content/<slug>.md');
+    expect(runtimePrompt).toContain('html: content/<slug>.html');
+    expect(runtimePrompt).toContain('cover: content/<slug>-cover.png');
+    expect(runtimePrompt).toContain('cover: content/<slug>-cover.svg');
+    expect(runtimePrompt).toMatch(/draft[\s\S]+Artifacts:/i);
+  });
+
   it('keeps business framing and research fallback in orchestration', () => {
     expect(runtimePrompt).toContain('умного владельца бизнеса без технического бэкграунда');
     expect(runtimePrompt).toContain('SERP unavailable');
