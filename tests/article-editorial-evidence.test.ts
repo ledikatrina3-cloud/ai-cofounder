@@ -108,7 +108,9 @@ describe('editorial evidence validation', () => {
   it('requires exactly one attempt for every enabled registry URL', () => {
     const evidence = validEvidence();
     evidence.references.pop();
-    evidence.references.push({ ...evidence.references[0] });
+    const firstReference = evidence.references[0];
+    if (firstReference === undefined) throw new Error('fixture requires a reference');
+    evidence.references.push({ ...firstReference });
     const result = runValidation(evidence, references);
 
     expect(result.status).toBe(1);
@@ -119,9 +121,14 @@ describe('editorial evidence validation', () => {
 
   it('requires observed_pattern only for opened references and all common fields', () => {
     const evidence = validEvidence();
-    evidence.references[0].observed_pattern = '';
-    evidence.references[1].status = 'unknown';
-    evidence.references[1].article_decision = 'не применено';
+    const openedReference = evidence.references[0];
+    const failedReference = evidence.references[1];
+    if (openedReference === undefined || failedReference === undefined) {
+      throw new Error('fixture requires opened and failed references');
+    }
+    openedReference.observed_pattern = '';
+    failedReference.status = 'unknown';
+    failedReference.article_decision = 'не применено';
     const result = runValidation(evidence, references);
 
     expect(result.status).toBe(1);

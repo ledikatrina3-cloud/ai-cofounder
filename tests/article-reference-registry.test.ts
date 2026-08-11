@@ -20,7 +20,7 @@ describe('article reference registry', () => {
       .split(/\r?\n/)
       .map((line) => line.match(/^\|\s*(https:\/\/[^|\s]+)\s*\|\s*([^|]+?)\s*\|$/))
       .filter((match): match is RegExpMatchArray => match !== null)
-      .map((match) => ({ url: match[1], purpose: match[2].trim() }));
+      .map((match) => ({ url: match[1], purpose: match[2]?.trim() ?? '' }));
 
     expect(rows).toHaveLength(5);
     expect(rows.map(({ url }) => url).sort()).toEqual([...requiredUrls].sort());
