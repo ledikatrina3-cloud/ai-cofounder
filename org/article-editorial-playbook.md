@@ -73,6 +73,18 @@ Writer не принимает собственную самооценку. От
     "writer_self_assessment_included": false
   },
   "verdict": "revise | accept",
+  "voice": {
+    "pass": true,
+    "evidence": "конкретные места, сверенные с политикой голоса"
+  },
+  "naturalSpeech": {
+    "pass": true,
+    "evidence": "фразы, проверенные как устная деловая речь"
+  },
+  "compositionDifference": {
+    "pass": true,
+    "evidence": "отличия композиции от корпуса недавних статей"
+  },
   "checked_risks": [
     {
       "category": "natural_language | voice | imitation | mastery | references | structure | facts",
@@ -89,7 +101,14 @@ Writer не принимает собственную самооценку. От
       "after": "исправленный текст"
     }
   ],
-  "mastery_evidence": [
+  "revisions": [
+    {
+      "before": "исходный текст",
+      "after": "предложенная редакция",
+      "reason": "какой подтвержденный дефект исправляется"
+    }
+  ],
+  "masteryEvidence": [
     {
       "source": "mastery/...",
       "method": "название метода",
@@ -98,14 +117,13 @@ Writer не принимает собственную самооценку. От
       "reason": "какое решение улучшено"
     }
   ],
-  "reference_evidence": [
+  "referenceInfluence": [
     {
       "url": "открытый URL",
       "used_pattern": "вопрос, угол, противоречие или форма",
       "article_decision": "как паттерн повлиял на материал"
     }
-  ],
-  "structure_comparison": "конкретные отличия от последних статей"
+  ]
 }
 ```
 

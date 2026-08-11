@@ -88,9 +88,12 @@ node scripts/article-editorial-context.mjs content/<slug>.md --content-dir conte
 
 ## 5. Редакторский gate
 
-Запусти отдельного редактора по контракту playbook и сохрани
+Сделай отдельный запуск редактора в чистом контексте по контракту playbook.
+Передай только статью, editorial context и playbook; самооценку writer не
+передавай. Отчет получает новый `review_run_id`, поле
+`writer_self_assessment_included: false` и сохраняется в
 `content/<slug>.qa/editor-review.json`. При `revise` выполни один ограниченный
-цикл правок и повтори QA. При повторном провале статья не готова.
+цикл правок и повтори детерминированный QA. При повторном провале статья не готова.
 
 ## 6. Выход
 
