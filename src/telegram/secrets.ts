@@ -35,6 +35,9 @@ export interface KeychainGetter {
   getPassword: (service: string, account: string) => Promise<string | null>;
 }
 
+export const TELEGRAM_BOT_TOKEN_FILE = '.secrets/telegram-bot-token';
+export const SUPPORT_BOT_TOKEN_FILE = '.secrets/support-bot-token';
+
 // Generic «прочитай секрет из Keychain или брось понятную ошибку».
 // `onMissing` — фабрика конкретной ошибки канала (TelegramTokenMissingError,
 // SupportBotTokenMissingError и т.д.), чтобы вызывающий код мог их различать
@@ -52,6 +55,42 @@ export async function readKeychainSecret(
 
 export interface PageReader {
   read: (path: string) => Promise<string>;
+}
+
+export async function readSecretFile(
+  secretPath: string,
+  io: PageReader = { read: (path) => readFile(path, 'utf8') },
+  cwd: string = process.cwd(),
+): Promise<string | null> {
+  const path = resolve(cwd, secretPath);
+  try {
+    const value = (await io.read(path)).trim();
+    return value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function readKeychainOrFileSecret(
+  service: string,
+  account: string,
+  secretPath: string,
+  onMissing: () => Error,
+  keychain: KeychainGetter = { getPassword },
+  io: PageReader = { read: (path) => readFile(path, 'utf8') },
+  cwd: string = process.cwd(),
+): Promise<string> {
+  let value: string | null;
+  try {
+    value = await keychain.getPassword(service, account);
+  } catch {
+    value = null;
+  }
+  if (value !== null && value !== '') return value;
+
+  const fileValue = await readSecretFile(secretPath, io, cwd);
+  if (fileValue !== null) return fileValue;
+  throw onMissing();
 }
 
 // Алиас для обратной совместимости с тестами фазы 1.2 — `ReadAllowlist` — был
@@ -115,7 +154,7 @@ export const FOUNDER_CHANNEL = 'founder-bot';
 export class TelegramTokenMissingError extends Error {
   constructor() {
     super(
-      `Telegram bot token не найден в Keychain. Запусти \`pnpm pair\` и введи токен — он сохранится в macOS Keychain под service '${KEYTAR_SERVICE}'.`,
+      `Telegram bot token не найден в Keychain. Запусти \`pnpm pair\` и введи токен — он сохранится в macOS Keychain под service '${KEYTAR_SERVICE}'. VPS fallback: ${TELEGRAM_BOT_TOKEN_FILE}.`,
     );
     this.name = 'TelegramTokenMissingError';
   }
@@ -123,12 +162,19 @@ export class TelegramTokenMissingError extends Error {
 
 // DI для тестов: подменяем keytar на vi.fn без реального Keychain-доступа.
 // В проде вызывается без аргумента — keytar пишет в Keychain.app.
-export async function getBotToken(keychain: KeychainGetter = { getPassword }): Promise<string> {
-  return readKeychainSecret(
+export async function getBotToken(
+  keychain: KeychainGetter = { getPassword },
+  io: PageReader = { read: (path) => readFile(path, 'utf8') },
+  cwd: string = process.cwd(),
+): Promise<string> {
+  return readKeychainOrFileSecret(
     KEYTAR_SERVICE,
     KEYTAR_ACCOUNT,
+    TELEGRAM_BOT_TOKEN_FILE,
     () => new TelegramTokenMissingError(),
     keychain,
+    io,
+    cwd,
   );
 }
 
@@ -164,7 +210,7 @@ export const SUPPORT_SOURCE_SECTION = 'support-source';
 export class SupportBotTokenMissingError extends Error {
   constructor() {
     super(
-      `Support bot token не найден в Keychain. Запусти \`pnpm pair:support\` и введи токен — он сохранится в macOS Keychain под service '${SUPPORT_KEYTAR_SERVICE}'.`,
+      `Support bot token не найден в Keychain. Запусти \`pnpm pair:support\` и введи токен — он сохранится в macOS Keychain под service '${SUPPORT_KEYTAR_SERVICE}'. VPS fallback: ${SUPPORT_BOT_TOKEN_FILE}.`,
     );
     this.name = 'SupportBotTokenMissingError';
   }
@@ -172,12 +218,17 @@ export class SupportBotTokenMissingError extends Error {
 
 export async function getSupportBotToken(
   keychain: KeychainGetter = { getPassword },
+  io: PageReader = { read: (path) => readFile(path, 'utf8') },
+  cwd: string = process.cwd(),
 ): Promise<string> {
-  return readKeychainSecret(
+  return readKeychainOrFileSecret(
     SUPPORT_KEYTAR_SERVICE,
     KEYTAR_ACCOUNT,
+    SUPPORT_BOT_TOKEN_FILE,
     () => new SupportBotTokenMissingError(),
     keychain,
+    io,
+    cwd,
   );
 }
 

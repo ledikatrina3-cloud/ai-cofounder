@@ -55,6 +55,16 @@ interface SkillsResponse {
   error?: string;
 }
 
+interface ArticleBriefResponse {
+  ok: boolean;
+  path?: string;
+  status?: string;
+  title?: string | null;
+  coreKeyword?: string | null;
+  markdown?: string;
+  error?: string;
+}
+
 interface RoutineDetailDrawerProps {
   routineId: string | null;
   onClose: () => void;
@@ -65,6 +75,8 @@ interface RoutineDetailDrawerProps {
 }
 
 const BRIDGE_URL = 'http://127.0.0.1:3737';
+const DETAIL_REFRESH_MS = 5000;
+const BRIEF_REFRESH_MS = 5000;
 
 const PALETTE = ['#d97757', '#7c9eb2', '#c4a747', '#9ca77c', '#7cb29a', '#a77c9c', '#b25555'];
 function colorFromId(id: string): string {
@@ -378,10 +390,11 @@ export function RoutineDetailDrawer({
       return;
     }
     let cancelled = false;
-    setLoading(true);
+    let firstLoad = true;
     setData(null);
     setSkills([]);
-    (async (): Promise<void> => {
+    const load = async (): Promise<void> => {
+      if (firstLoad) setLoading(true);
       const detailPromise = fetch(`${BRIDGE_URL}/routines/${encodeURIComponent(routineId)}`)
         .then((res) => res.json() as Promise<DetailResponse>)
         .catch(
@@ -400,10 +413,18 @@ export function RoutineDetailDrawer({
       if (skillsBody.ok && Array.isArray(skillsBody.skills)) {
         setSkills(skillsBody.skills);
       }
-      setLoading(false);
-    })();
+      if (firstLoad) {
+        setLoading(false);
+        firstLoad = false;
+      }
+    };
+    void load();
+    const detailInterval = window.setInterval(() => {
+      void load();
+    }, DETAIL_REFRESH_MS);
     return () => {
       cancelled = true;
+      window.clearInterval(detailInterval);
     };
   }, [routineId]);
 
@@ -617,6 +638,10 @@ function DrawerBody(props: DrawerBodyProps): ReactNode {
           >
             {routine.description}
           </div>
+        )}
+
+        {(routine.id === 'article-brief-researcher' || routine.id === 'article-writer') && (
+          <ArticleBriefReviewPanel accentColor={accentColor} />
         )}
 
         {/* Skills — резолвнутые скиллы routine'ы (Фаза 3 плана
@@ -904,6 +929,299 @@ function DrawerBody(props: DrawerBodyProps): ReactNode {
         )}
       </div>
     </>
+  );
+}
+
+function ArticleBriefReviewPanel({ accentColor }: { accentColor: string }): ReactNode {
+  const [brief, setBrief] = useState<ArticleBriefResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [reviewComment, setReviewComment] = useState('');
+
+  const loadBrief = useCallback(async (showLoading = true): Promise<void> => {
+    if (showLoading) {
+      setLoading(true);
+      setMessage(null);
+    }
+    try {
+      const res = await fetch(`${BRIDGE_URL}/content/briefs/latest`);
+      const body = (await res.json().catch(() => null)) as ArticleBriefResponse | null;
+      setBrief(body ?? { ok: false, error: `HTTP ${res.status}` });
+    } catch (err) {
+      setBrief({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBrief();
+    const briefInterval = window.setInterval(() => {
+      void loadBrief(false);
+    }, BRIEF_REFRESH_MS);
+    return () => window.clearInterval(briefInterval);
+  }, [loadBrief]);
+
+  const runWriter = useCallback(async (): Promise<void> => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      if (brief?.status === 'needs_human_review') {
+        const approveRes = await fetch(`${BRIDGE_URL}/content/briefs/latest/approve`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+        });
+        const approveBody = (await approveRes
+          .json()
+          .catch(() => null)) as ArticleBriefResponse | null;
+        if (!approveRes.ok || approveBody?.ok !== true) {
+          throw new Error(approveBody?.error ?? `approve failed: HTTP ${approveRes.status}`);
+        }
+      }
+
+      const runRes = await fetch(`${BRIDGE_URL}/routines/article-writer/run`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      });
+      const runBody = (await runRes.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+      } | null;
+      if (!runRes.ok || runBody?.ok !== true) {
+        throw new Error(runBody?.error ?? `writer run failed: HTTP ${runRes.status}`);
+      }
+      setMessage('writer запущен');
+      await loadBrief();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [brief?.status, loadBrief]);
+
+  const rejectBrief = useCallback(async (): Promise<void> => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`${BRIDGE_URL}/content/briefs/latest/reject`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ comment: reviewComment }),
+      });
+      const body = (await res.json().catch(() => null)) as ArticleBriefResponse | null;
+      if (!res.ok || body?.ok !== true) {
+        throw new Error(body?.error ?? `reject failed: HTTP ${res.status}`);
+      }
+      setMessage('brief \u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d');
+      setReviewComment('');
+      await loadBrief();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [loadBrief, reviewComment]);
+
+  const requestResearchRetry = useCallback(async (): Promise<void> => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`${BRIDGE_URL}/content/briefs/latest/research-retry`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ comment: reviewComment }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | (ArticleBriefResponse & { routineId?: string })
+        | null;
+      if (!res.ok || body?.ok !== true) {
+        throw new Error(body?.error ?? `research retry failed: HTTP ${res.status}`);
+      }
+      setMessage('researcher \u0437\u0430\u043f\u0443\u0449\u0435\u043d');
+      setReviewComment('');
+      await loadBrief();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [loadBrief, reviewComment]);
+
+  const status = brief?.status ?? 'unknown';
+  const needsReview = status === 'needs_human_review';
+  const canRun = brief?.ok === true && (needsReview || status === 'approved');
+
+  return (
+    <Section title="brief review">
+      <div
+        style={{
+          padding: 12,
+          border: `1px solid ${needsReview ? '#c4a747' : 'rgba(217,119,87,0.22)'}`,
+          borderRadius: 4,
+          background: needsReview ? 'rgba(196,167,71,0.08)' : 'rgba(217,119,87,0.05)',
+        }}
+      >
+        {loading ? (
+          <div style={{ opacity: 0.65 }}>loading latest brief...</div>
+        ) : brief?.ok !== true ? (
+          <div style={{ color: '#b25555' }}>brief не найден: {brief?.error ?? 'unknown error'}</div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+              <Pill color={needsReview ? '#c4a747' : '#7cb29a'}>Status: {status}</Pill>
+              {brief.coreKeyword !== null && brief.coreKeyword !== undefined && (
+                <Pill color="#7c9eb2">{brief.coreKeyword}</Pill>
+              )}
+            </div>
+            {brief.title !== null && brief.title !== undefined && (
+              <div style={{ fontSize: 12, color: accentColor, lineHeight: 1.4, marginBottom: 8 }}>
+                {brief.title}
+              </div>
+            )}
+            <div style={{ fontSize: 10, opacity: 0.55, marginBottom: 8 }}>{brief.path}</div>
+            <pre
+              style={{
+                margin: 0,
+                padding: 10,
+                fontSize: 10,
+                fontFamily: 'JetBrains Mono, Menlo, monospace',
+                color: '#e9e3dc',
+                background: 'rgba(0,0,0,0.24)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 3,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                maxHeight: 360,
+                overflow: 'auto',
+                lineHeight: 1.45,
+              }}
+            >
+              {brief.markdown}
+            </pre>
+            {needsReview && (
+              <textarea
+                value={reviewComment}
+                onChange={(event) => setReviewComment(event.target.value)}
+                placeholder={
+                  '\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439 \u043a \u0440\u0435\u0448\u0435\u043d\u0438\u044e'
+                }
+                rows={3}
+                style={{
+                  width: '100%',
+                  marginTop: 10,
+                  padding: 10,
+                  fontFamily: 'inherit',
+                  fontSize: 11,
+                  color: '#e9e3dc',
+                  background: 'rgba(0,0,0,0.24)',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: 3,
+                  resize: 'vertical',
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                }}
+              />
+            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+              {needsReview && (
+                <button
+                  type="button"
+                  onClick={rejectBrief}
+                  disabled={busy}
+                  style={{
+                    padding: '9px 10px',
+                    fontFamily: 'inherit',
+                    fontSize: 11,
+                    color: '#b25555',
+                    background: 'transparent',
+                    border: '1px solid rgba(178,85,85,0.65)',
+                    borderRadius: 3,
+                    cursor: busy ? 'not-allowed' : 'pointer',
+                    opacity: busy ? 0.65 : 1,
+                  }}
+                >
+                  {'\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c'}
+                </button>
+              )}
+              {needsReview && (
+                <button
+                  type="button"
+                  onClick={requestResearchRetry}
+                  disabled={busy || reviewComment.trim() === ''}
+                  style={{
+                    padding: '9px 10px',
+                    fontFamily: 'inherit',
+                    fontSize: 11,
+                    color: '#c4a747',
+                    background: 'transparent',
+                    border: '1px solid rgba(196,167,71,0.7)',
+                    borderRadius: 3,
+                    cursor: busy || reviewComment.trim() === '' ? 'not-allowed' : 'pointer',
+                    opacity: busy || reviewComment.trim() === '' ? 0.5 : 1,
+                  }}
+                >
+                  {
+                    '\u041d\u0430 \u043d\u043e\u0432\u043e\u0435 \u0438\u0441\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u0438\u0435'
+                  }
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={runWriter}
+                disabled={!canRun || busy}
+                style={{
+                  flex: '1 1 240px',
+                  padding: '9px 10px',
+                  fontFamily: 'inherit',
+                  fontSize: 11,
+                  color: '#0a0a0a',
+                  background: canRun ? accentColor : 'rgba(255,255,255,0.12)',
+                  border: `1px solid ${canRun ? accentColor : 'rgba(255,255,255,0.12)'}`,
+                  borderRadius: 3,
+                  cursor: canRun && !busy ? 'pointer' : 'not-allowed',
+                  opacity: busy ? 0.65 : 1,
+                }}
+              >
+                {needsReview
+                  ? '\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c writer'
+                  : '\u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c writer'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void loadBrief();
+                }}
+                disabled={busy}
+                style={{
+                  padding: '9px 10px',
+                  fontFamily: 'inherit',
+                  fontSize: 11,
+                  color: accentColor,
+                  background: 'transparent',
+                  border: `1px solid ${accentColor}`,
+                  borderRadius: 3,
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {'\u041e\u0431\u043d\u043e\u0432\u0438\u0442\u044c'}
+              </button>
+            </div>
+            {message !== null && (
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 10,
+                  color: message.includes('failed') ? '#b25555' : '#9ca77c',
+                }}
+              >
+                {message}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Section>
   );
 }
 

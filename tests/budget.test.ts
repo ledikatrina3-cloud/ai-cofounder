@@ -9,6 +9,7 @@ import { assertSchemaInvariants } from '../src/db/invariants-check.js';
 import { loadEnv } from '../src/env.js';
 import { type AnthropicMessagesClient, BudgetExceededError, call } from '../src/llm/call.js';
 import { getMoneyReportData } from '../src/llm/money-report.js';
+import { computeCurrentSpend } from '../src/llm/spend.js';
 import { resetTransportForTests } from '../src/llm/transport.js';
 
 // Форсим apikey-режим: транспорт читает LLM_TRANSPORT при первом getTransport(),
@@ -46,6 +47,49 @@ beforeEach(async () => {
   // Sandbox-стратегия: каждый тестовый прогон использует свою БД через ANTHROPIC_TEST_DB_URL? Слишком тяжело.
   // Простое: используем уникальный ULID-prefix для тестовых записей и сравниваем относительные дельты,
   // а не абсолютные значения. См. конкретные тесты ниже.
+});
+
+describe('cost-meter - cycle window', () => {
+  it('event.routine.trigger starts a new per-cycle budget window', async () => {
+    const now = Date.now();
+    const oldSpendId = ulid();
+    await db.$executeRawUnsafe(
+      `INSERT INTO "Record" (id, type, properties, actorKind, visibility, status, closedAt, createdAt) VALUES (?, 'audit.spend', ?, 'agent', 'autonomous', 'closed', ?, ?)`,
+      oldSpendId,
+      JSON.stringify({
+        promptId: `test:old-cycle-${oldSpendId}`,
+        model: 'codex-default',
+        modelRequested: 'claude-opus-4-7',
+        inputTokens: 999_999,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        usd: 0,
+        pricingAsOf: now - 20,
+        transport: 'codex',
+      }),
+      now - 20,
+      now - 20,
+    );
+
+    const triggerId = ulid();
+    await db.$executeRawUnsafe(
+      `INSERT INTO "Record" (id, type, properties, idempotencyKey, actorKind, visibility, status, closedAt, createdAt) VALUES (?, 'event.routine.trigger', ?, ?, 'system', 'autonomous', 'active', ?, ?)`,
+      triggerId,
+      JSON.stringify({
+        routineId: 'article-writer',
+        projectId: 'self',
+        runDate: '2026-07-23',
+        source: 'manual',
+      }),
+      `test:event-routine-trigger:${triggerId}`,
+      now - 10,
+      now - 10,
+    );
+
+    const current = await computeCurrentSpend(db, new Date(now));
+    expect(current.perCycle.inputTokens).toBe(0);
+  });
 });
 
 describe('cost-meter — pre-call guard и audit.spend', () => {

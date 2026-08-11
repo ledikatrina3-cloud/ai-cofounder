@@ -21,17 +21,22 @@
 // memo через resetTransportForTests(). verifyGatewayReady() — опциональный
 // health-check gateway, НЕ подключён к горячему пути (см. его комментарий).
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { loadEnv } from '../env.js';
 
-export type TransportMode = 'oauth' | 'apikey';
+export type TransportMode = 'oauth' | 'apikey' | 'codex';
 
 export interface TransportConfig {
   mode: TransportMode;
   // Для Anthropic SDK direct (call.ts):
   baseURL?: string; // oauth: 'http://127.0.0.1:8787', apikey: undefined
   apiKey: string; // oauth: dummy, apikey: real ANTHROPIC_API_KEY
-  // Для subagent.ts subprocess-пути:
-  claudeCliPath?: string; // oauth: путь к 'claude' (resolve через PATH либо абсолютный)
+  // CLI subprocess paths.
+  claudeCliPath?: string; // oauth: path to 'claude'
+  codexCliPath?: string; // codex: path to 'codex'
+  codexModel?: string; // codex: optional model override for `codex exec -m`
+  codexNetworkAccess?: boolean; // codex: opt-in network access for workspace-write sandbox
 }
 
 export class TransportConfigError extends Error {
@@ -52,6 +57,7 @@ const DEFAULT_GATEWAY_URL = 'http://127.0.0.1:8787';
 // Dummy-ключ: gateway игнорирует x-api-key (он сам подставляет OAuth
 // Bearer). Но Anthropic SDK требует непустую строку.
 const OAUTH_DUMMY_KEY = 'sk-dummy-oauth-route';
+const CODEX_DUMMY_KEY = 'sk-dummy-codex-route';
 
 let cached: TransportConfig | null = null;
 let gatewayVerified = false;
@@ -61,21 +67,36 @@ export function getTransport(): TransportConfig {
   loadEnv();
 
   const raw = process.env.LLM_TRANSPORT ?? 'apikey';
-  if (raw !== 'oauth' && raw !== 'apikey') {
+  if (raw !== 'oauth' && raw !== 'apikey' && raw !== 'codex') {
     throw new TransportConfigError(
-      `LLM_TRANSPORT="${raw}" не распознан. Допустимые значения: "apikey" (дефолт, рекомендуемый — через ANTHROPIC_API_KEY) или "oauth" (экспериментальный, НЕ endorsed — маршрут через ваш локальный gateway по LLM_GATEWAY_URL).`,
+      `LLM_TRANSPORT="${raw}" ?? ?????????. ?????????? ????????: "apikey" (??????, ????????????? ? ????? ANTHROPIC_API_KEY), "oauth" (?????????????????, ?? endorsed ? ??????? ????? ??? ????????? gateway ?? LLM_GATEWAY_URL) ??? "codex" (Codex CLI ????? codex exec).`,
     );
   }
   const mode: TransportMode = raw;
 
   if (mode === 'oauth') {
     const baseURL = process.env.LLM_GATEWAY_URL ?? DEFAULT_GATEWAY_URL;
-    const claudeCliPath = process.env.CLAUDE_CLI_PATH ?? 'claude';
+    const claudeCliPath = nonEmptyEnv('CLAUDE_CLI_PATH') ?? 'claude';
     cached = {
       mode,
       baseURL,
       apiKey: OAUTH_DUMMY_KEY,
       claudeCliPath,
+    };
+    return cached;
+  }
+
+  if (mode === 'codex') {
+    const codexCliPath = nonEmptyEnv('CODEX_CLI_PATH') ?? defaultCodexCliPath();
+    const codexModel = nonEmptyEnv('CODEX_MODEL');
+    const codexNetworkAccess =
+      boolEnv('CODEX_SANDBOX_NETWORK_ACCESS') ?? boolEnv('CODEX_NETWORK_ACCESS') ?? false;
+    cached = {
+      mode,
+      apiKey: CODEX_DUMMY_KEY,
+      codexCliPath,
+      ...(codexModel !== undefined ? { codexModel } : {}),
+      ...(codexNetworkAccess ? { codexNetworkAccess } : {}),
     };
     return cached;
   }
@@ -137,4 +158,31 @@ export async function verifyGatewayReady(
     );
   }
   gatewayVerified = true;
+}
+
+function nonEmptyEnv(key: string): string | undefined {
+  const value = process.env[key];
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
+function boolEnv(key: string): boolean | undefined {
+  const value = nonEmptyEnv(key);
+  if (value === undefined) return undefined;
+  const normalized = value.toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  throw new TransportConfigError(
+    `${key}="${value}" is invalid. Use true/false, 1/0, yes/no, or on/off.`,
+  );
+}
+
+function defaultCodexCliPath(): string {
+  const home = process.env.HOME;
+  if (home !== undefined && home.trim() !== '') {
+    const localBin = join(home, '.local/bin/codex');
+    if (existsSync(localBin)) return localBin;
+  }
+  return 'codex';
 }

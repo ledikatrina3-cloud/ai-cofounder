@@ -26,7 +26,7 @@ export interface QuotaSnapshot {
 }
 
 export interface MoneyReportRow {
-  transport: 'oauth' | 'apikey';
+  transport: 'oauth' | 'apikey' | 'codex';
   daily: {
     usd: number; // в oauth-режиме всегда 0 (биллинг идёт по квоте подписки)
     cap: number;

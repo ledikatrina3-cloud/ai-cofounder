@@ -1,6 +1,6 @@
 // research-serp/scripts/search.ts
 //
-// Бесплатный SERP через DuckDuckGo HTML endpoint (https://html.duckduckgo.com/html/).
+// Бесплатный SERP через DuckDuckGo HTML/Lite endpoints.
 // Возвращает топ-10 результатов как JSON.
 //
 // Использование:
@@ -30,7 +30,15 @@ export interface SerpOutput {
 }
 
 const DEFAULT_LIMIT = 10;
-const DDG_URL = 'https://html.duckduckgo.com/html/';
+const DDG_HTML_URL = 'https://html.duckduckgo.com/html/';
+const DDG_LITE_URL = 'https://lite.duckduckgo.com/lite/';
+const DEFAULT_RETRY_DELAY_MS = 700;
+
+const DDG_ENDPOINTS = [
+  { name: 'ddg-html-post', url: DDG_HTML_URL, method: 'POST' },
+  { name: 'ddg-lite-get', url: DDG_LITE_URL, method: 'GET' },
+  { name: 'ddg-html-get', url: DDG_HTML_URL, method: 'GET' },
+] as const;
 
 function parseArgs(argv: string[]): { topic: string | null; limit: number } {
   const positional = argv.filter((a) => !a.startsWith('--'));
@@ -87,7 +95,7 @@ function unwrapDdgRedirect(href: string): string {
  * Парсит HTML DDG-результатов в массив SerpResult. Экспортируется для
  * unit-тестов (без сетевых вызовов).
  */
-export function parseSerpHtml(html: string, limit: number): SerpResult[] {
+function parseClassicSerpHtml(html: string, limit: number): SerpResult[] {
   const results: SerpResult[] = [];
   // Каждый результат у DDG — блок `<div class="result ...">` с внутри
   // <a class="result__a" href="...">TITLE</a>, <a class="result__snippet">SNIPPET</a>.
@@ -116,10 +124,100 @@ export function parseSerpHtml(html: string, limit: number): SerpResult[] {
   return results;
 }
 
+function isSearchResultUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol.startsWith('http') && !parsed.hostname.endsWith('duckduckgo.com');
+  } catch {
+    return false;
+  }
+}
+
+function parseLiteSerpHtml(html: string, limit: number): SerpResult[] {
+  const results: SerpResult[] = [];
+  const seenUrls = new Set<string>();
+  const liteAnchorRe = /<a[^>]*href=(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  // biome-ignore lint/suspicious/noAssignInExpressions: classic regex iterate loop
+  while ((m = liteAnchorRe.exec(html)) !== null) {
+    if (results.length >= limit) break;
+    const href = m[2];
+    const titleRaw = m[3];
+    if (href === undefined || titleRaw === undefined) continue;
+    const url = unwrapDdgRedirect(decodeHtmlEntities(href));
+    const title = decodeHtmlEntities(stripTags(titleRaw)).replace(/\s+/g, ' ').trim();
+    if (title === '' || url === '' || !isSearchResultUrl(url) || seenUrls.has(url)) continue;
+
+    const tail = html.slice(liteAnchorRe.lastIndex, liteAnchorRe.lastIndex + 2500);
+    const snipMatch =
+      /<td[^>]*class=(["'])[^"']*result-snippet[^"']*\1[^>]*>([\s\S]*?)<\/td>/i.exec(tail) ??
+      /<span[^>]*class=(["'])[^"']*result-snippet[^"']*\1[^>]*>([\s\S]*?)<\/span>/i.exec(tail);
+    const snippet =
+      snipMatch !== null && snipMatch[2] !== undefined
+        ? decodeHtmlEntities(stripTags(snipMatch[2])).replace(/\s+/g, ' ').trim()
+        : '';
+
+    seenUrls.add(url);
+    results.push({ title, url, snippet });
+  }
+  return results;
+}
+
+/**
+ * Парсит HTML DDG-результатов в массив SerpResult. Экспортируется для
+ * unit-тестов (без сетевых вызовов).
+ */
+export function parseSerpHtml(html: string, limit: number): SerpResult[] {
+  const classicResults = parseClassicSerpHtml(html, limit);
+  if (classicResults.length > 0) return classicResults;
+  return parseLiteSerpHtml(html, limit);
+}
+
 export interface FetchSerpOptions {
   /** DI для тестов: подменить fetch. */
   fetcher?: typeof fetch;
   limit?: number;
+  retryDelayMs?: number;
+}
+
+function buildEndpointRequest(
+  endpoint: (typeof DDG_ENDPOINTS)[number],
+  topic: string,
+): { url: string; init: RequestInit } {
+  const params = new URLSearchParams({ q: topic });
+  const headers = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    // DDG требует User-Agent. Маскируемся под обычный браузер.
+    'User-Agent':
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+    Accept: 'text/html,application/xhtml+xml',
+    'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.7',
+  };
+
+  if (endpoint.method === 'GET') {
+    return {
+      url: `${endpoint.url}?${params.toString()}`,
+      init: { method: endpoint.method, headers },
+    };
+  }
+
+  return {
+    url: endpoint.url,
+    init: {
+      method: endpoint.method,
+      headers,
+      body: params.toString(),
+    },
+  };
+}
+
+function looksBlocked(html: string): boolean {
+  return /(captcha|anomaly|rate[-\s]?limit|unusual traffic|not a robot|vqd=|403 forbidden)/i.test(html);
+}
+
+async function delay(ms: number): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -132,40 +230,40 @@ export async function fetchSerp(
 ): Promise<SerpOutput> {
   const limit = options.limit ?? DEFAULT_LIMIT;
   const f = options.fetcher ?? fetch;
-  const body = new URLSearchParams({ q: topic }).toString();
-  try {
-    const resp = await f(DDG_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        // DDG требует User-Agent. Маскируемся под обычный браузер.
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-        Accept: 'text/html',
-      },
-      body,
-    });
-    if (!resp.ok) {
-      return {
-        topic,
-        results: [],
-        errors: [`DDG returned status ${resp.status}`],
-      };
+  const retryDelayMs = options.retryDelayMs ?? (options.fetcher ? 0 : DEFAULT_RETRY_DELAY_MS);
+  const errors: string[] = [];
+
+  for (const [index, endpoint] of DDG_ENDPOINTS.entries()) {
+    const request = buildEndpointRequest(endpoint, topic);
+    try {
+      const resp = await f(request.url, request.init);
+      if (!resp.ok) {
+        errors.push(`${endpoint.name}: DDG returned status ${resp.status}`);
+      } else {
+        const html = await resp.text();
+        const results = parseSerpHtml(html, limit);
+        if (results.length > 0) {
+          return { topic, results, errors: [] };
+        }
+        errors.push(
+          `${endpoint.name}: DDG не вернул результатов${looksBlocked(html) ? ' (возможно, капча или rate-limit)' : ''}`,
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${endpoint.name}: fetch error: ${msg}`);
     }
-    const html = await resp.text();
-    const results = parseSerpHtml(html, limit);
-    if (results.length === 0) {
-      return {
-        topic,
-        results: [],
-        errors: ['DDG не вернул результатов (возможно, капча или rate-limit)'],
-      };
+
+    if (index < DDG_ENDPOINTS.length - 1) {
+      await delay(retryDelayMs);
     }
-    return { topic, results, errors: [] };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { topic, results: [], errors: [`fetch error: ${msg}`] };
   }
+
+  return {
+    topic,
+    results: [],
+    errors: errors.length > 0 ? errors : ['DDG не вернул результатов (возможно, капча или rate-limit)'],
+  };
 }
 
 async function main(): Promise<void> {

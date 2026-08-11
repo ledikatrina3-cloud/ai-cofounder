@@ -16,7 +16,16 @@ import {
   verifyGatewayReady,
 } from '../src/llm/transport.js';
 
-const ENV_KEYS = ['LLM_TRANSPORT', 'LLM_GATEWAY_URL', 'CLAUDE_CLI_PATH', 'ANTHROPIC_API_KEY'];
+const ENV_KEYS = [
+  'LLM_TRANSPORT',
+  'LLM_GATEWAY_URL',
+  'CLAUDE_CLI_PATH',
+  'CODEX_CLI_PATH',
+  'CODEX_MODEL',
+  'CODEX_SANDBOX_NETWORK_ACCESS',
+  'CODEX_NETWORK_ACCESS',
+  'ANTHROPIC_API_KEY',
+];
 
 describe('transport — config', () => {
   let savedEnv: Record<string, string | undefined>;
@@ -42,7 +51,8 @@ describe('transport — config', () => {
     resetTransportForTests();
   });
 
-  it('дефолт — apikey (через ANTHROPIC_API_KEY)', () => {
+  it('apikey ? ????? ANTHROPIC_API_KEY', () => {
+    process.env.LLM_TRANSPORT = 'apikey';
     process.env.ANTHROPIC_API_KEY = 'sk-ant-default';
     const t = getTransport();
     expect(t.mode).toBe('apikey');
@@ -75,6 +85,26 @@ describe('transport — config', () => {
     expect(t.claudeCliPath).toBe('/opt/claude/bin/claude');
   });
 
+  it('codex (????) ? CLI ???? ? optional model ??? ANTHROPIC_API_KEY', () => {
+    process.env.LLM_TRANSPORT = 'codex';
+    process.env.CODEX_CLI_PATH = '/root/.local/bin/codex';
+    process.env.CODEX_MODEL = 'gpt-5-codex';
+    const t = getTransport();
+    expect(t.mode).toBe('codex');
+    expect(t.codexCliPath).toBe('/root/.local/bin/codex');
+    expect(t.codexModel).toBe('gpt-5-codex');
+    expect(t.apiKey).toBe('sk-dummy-codex-route');
+    expect(isOauthMode()).toBe(false);
+  });
+
+  it('codex network access flag enables sandbox network', () => {
+    process.env.LLM_TRANSPORT = 'codex';
+    process.env.CODEX_SANDBOX_NETWORK_ACCESS = 'true';
+    const t = getTransport();
+    expect(t.mode).toBe('codex');
+    expect(t.codexNetworkAccess).toBe(true);
+  });
+
   it('LLM_TRANSPORT=apikey с ANTHROPIC_API_KEY → apikey config', () => {
     process.env.LLM_TRANSPORT = 'apikey';
     process.env.ANTHROPIC_API_KEY = 'sk-ant-real-key';
@@ -96,7 +126,7 @@ describe('transport — config', () => {
   it('LLM_TRANSPORT=garbage → TransportConfigError с подсказкой', () => {
     process.env.LLM_TRANSPORT = 'garbage';
     expect(() => getTransport()).toThrowError(TransportConfigError);
-    expect(() => getTransport()).toThrow(/oauth|apikey/);
+    expect(() => getTransport()).toThrow(/oauth|apikey|codex/);
   });
 
   it('memo: повторный getTransport возвращает тот же объект', () => {

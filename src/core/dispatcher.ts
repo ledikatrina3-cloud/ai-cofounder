@@ -47,12 +47,18 @@ import { type PrismaClient, getPrisma } from '../db/client.js';
 import { checkDepartmentDailyBudget } from '../llm/department-budget.js';
 import { emit } from '../observe/bridge.js';
 import { getProject } from '../projects/registry.js';
+import { resolveReportArtifacts, sendReportArtifacts } from '../report/artifacts.js';
 import { renderRoutineOutput } from '../report/render.js';
 import type { Routine } from '../routines/parser.js';
 import { getRoutine, listRoutines } from '../routines/registry.js';
 import type { ExecRoutineDeps } from '../routines/runtime.js';
 import { executeRoutine, resolveRoutineSkills } from '../routines/runtime.js';
 import { getAllowlist, getBotToken } from '../telegram/secrets.js';
+import {
+  type RoutineSignalSubscription,
+  handleRoutineCompletedSignal,
+  loadRoutineSignalSubscriptions,
+} from './routine-signals.js';
 import type { RunRoutineTrigger } from './triggers.js';
 
 // ---------------------------------------------------------------------------
@@ -81,6 +87,8 @@ export interface RunRoutineDeps {
   // listRoutines, чтобы не тащить всю файловую систему. Если не задан —
   // используется реальный listRoutines из routines/registry.
   listRoutinesFn?: () => Promise<Routine[]>;
+  loadRoutineSignalSubscriptions?: () => Promise<RoutineSignalSubscription[]>;
+  handleRoutineCompletedSignalImpl?: typeof handleRoutineCompletedSignal;
 }
 
 export type SkipReason =
@@ -102,14 +110,6 @@ export async function runRoutine(
   const db = deps.db ?? getPrisma();
   const nowFn = deps.now ?? Date.now;
   const startedAt = nowFn();
-
-  // Bridge видит routine ВСЕГДА — даже если её нет, даже если skipped.
-  await emit({
-    type: 'routine.start',
-    routineId,
-    runDate,
-    trigger: { source: trigger.source, idempotencyKey: trigger.idempotencyKey },
-  });
 
   // ── 1. Загружаем routine. null → audit.routine.skipped + ранний выход. ──
   const routineLoader = deps.getRoutine ?? ((id: string) => getRoutine(id));
@@ -229,6 +229,14 @@ export async function runRoutine(
     nowMs: nowFn(),
     skills: skillNames,
   });
+  // Live-start отправляем только после durable trigger + audit.start.
+  // Иначе ранний сбой loader/DB оставляет UI в вечном running без пары routine.end.
+  await emit({
+    type: 'routine.start',
+    routineId,
+    runDate,
+    trigger: { source: trigger.source, idempotencyKey: trigger.idempotencyKey },
+  });
 
   // ── 4b. Department-level budget guard (Фаза 5 п. 8 плана v3). ──────────
   //   Если у routine есть departmentId и DEPARTMENT.md объявляет budget —
@@ -311,6 +319,17 @@ export async function runRoutine(
       durationMs: result.durationMs,
     });
 
+    if (execStatus === 'ok') {
+      await runCompletionSignals({
+        deps,
+        db,
+        routineId,
+        runDate,
+        trigger,
+        eventTriggerId: upsert.eventTriggerId,
+      });
+    }
+
     // ── 6. Фаза 3.3: отправляем output в Telegram если нужно. ─────────────
     if (routine.outputType === 'telegram-thread' || routine.outputType === 'both') {
       try {
@@ -357,6 +376,46 @@ export async function runRoutine(
   }
 }
 
+async function runCompletionSignals(args: {
+  deps: RunRoutineDeps;
+  db: PrismaClient;
+  routineId: string;
+  runDate: string;
+  trigger: RunRoutineTrigger;
+  eventTriggerId: string;
+}): Promise<void> {
+  const hook = args.deps.handleRoutineCompletedSignalImpl ?? handleRoutineCompletedSignal;
+  try {
+    await hook({
+      db: args.db,
+      sourceRoutineId: args.routineId,
+      runDate: args.runDate,
+      sourceEventTriggerId: args.eventTriggerId,
+      rootEventTriggerId: args.trigger.signal?.rootEventTriggerId ?? args.eventTriggerId,
+      visitedRoutineIds: args.trigger.signal?.visitedRoutineIds ?? [args.routineId],
+      loadSubscriptions:
+        args.deps.loadRoutineSignalSubscriptions ?? (() => loadRoutineSignalSubscriptions()),
+      runRoutine: (targetRoutineId, runDate, trigger) =>
+        runRoutine(targetRoutineId, runDate, trigger, {
+          db: args.db,
+          getRoutine: args.deps.getRoutine,
+          getProject: args.deps.getProject,
+          execRoutineDeps: args.deps.execRoutineDeps,
+          executeRoutineImpl: args.deps.executeRoutineImpl,
+          sendToFounder: args.deps.sendToFounder,
+          listRoutinesFn: args.deps.listRoutinesFn,
+          loadRoutineSignalSubscriptions: args.deps.loadRoutineSignalSubscriptions,
+          handleRoutineCompletedSignalImpl: args.deps.handleRoutineCompletedSignalImpl,
+        }),
+    });
+  } catch (err) {
+    console.error(
+      `[dispatcher] routine '${args.routineId}': completion signal failed (best-effort):`,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Фаза 3.3: отправка сообщения фаундеру через реальный Telegram-клиент.
 // ---------------------------------------------------------------------------
@@ -373,22 +432,31 @@ function buildDefaultSendToFounder(_db: PrismaClient): (text: string) => Promise
     const token = await getBotToken();
     // Ленивый импорт grammy — тесты, которые подменяют sendToFounder через DI,
     // не загружают grammy в process.
-    const { Bot } = await import('grammy');
+    const { Bot, InputFile } = await import('grammy');
     const bot = new Bot(token);
     try {
       await bot.api.sendMessage(chatId, text, { parse_mode: 'Markdown' });
     } catch (err) {
-      // Markdown-parse error от Telegram (400: can't parse entities) случается
-      // когда в тексте несбалансированы `_`, `*` или есть незакрытый ```.
-      // Фаундер всё равно должен получить сообщение — отправляем plain text
-      // как fallback. Прецедент: 2026-05-22, routine marketing-content-example
-      // (agent обернул финал в ``` → Telegram отверг весь Markdown).
       const msg = err instanceof Error ? err.message : String(err);
       const isParseError = msg.includes("can't parse entities") || msg.includes('parse entities');
       if (!isParseError) throw err;
       console.warn(`[dispatcher] Markdown parse failed (${msg}), retrying as plain text.`);
       await bot.api.sendMessage(chatId, text);
     }
+
+    const artifacts = await resolveReportArtifacts(text);
+    if (artifacts.length === 0) return;
+    await sendReportArtifacts(
+      chatId,
+      artifacts,
+      {
+        sendPhoto: (targetChatId, file, opts) =>
+          bot.api.sendPhoto(targetChatId, file as InstanceType<typeof InputFile>, opts ?? {}),
+        sendDocument: (targetChatId, file, opts) =>
+          bot.api.sendDocument(targetChatId, file as InstanceType<typeof InputFile>, opts ?? {}),
+      },
+      (artifactPath) => new InputFile(artifactPath),
+    );
   };
 }
 
@@ -420,6 +488,7 @@ async function upsertEventRoutineTrigger(
     projectId: args.projectId,
     runDate: args.runDate,
     source: args.trigger.source,
+    ...(args.trigger.signal !== undefined ? { signal: args.trigger.signal } : {}),
   });
 
   const inserted = await db.$queryRawUnsafe<{ id: string }[]>(

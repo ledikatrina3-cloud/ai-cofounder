@@ -5,12 +5,15 @@
 //   * `generateCover` — DI'м readTemplate + writeFile, проверяем что
 //     title подставлен и записан в правильное место.
 
+import { readdir, readFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import {
   escapeXml,
   generateCover,
   renderTemplate,
 } from '../skills/cover-design/scripts/generate.js';
+
+const templatesDir = new URL('../skills/cover-design/assets/templates/', import.meta.url);
 
 describe('escapeXml', () => {
   it('экранирует <, >, &, ", \'', () => {
@@ -33,6 +36,38 @@ describe('renderTemplate', () => {
   it('экранирует XML-спецсимволы в title', () => {
     const tpl = '<svg>{{TITLE}}</svg>';
     expect(renderTemplate(tpl, '<bold>')).toBe('<svg>&lt;bold&gt;</svg>');
+  });
+  it('заменяет foreignObject-title на native SVG text для PNG-конвертации', () => {
+    const tpl = `<svg>
+      <foreignObject x="80" y="180" width="1040" height="280">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, system-ui, sans-serif; color: #F8FAFC; font-size: 60px; line-height: 1.18; font-weight: 700; word-wrap: break-word;">
+          {{TITLE}}
+        </div>
+      </foreignObject>
+    </svg>`;
+    const rendered = renderTemplate(tpl, 'Skills over prompts');
+    expect(rendered).not.toContain('<foreignObject');
+    expect(rendered).toContain('<text ');
+    expect(rendered).toContain('<tspan');
+    expect(rendered).toContain('Skills over prompts');
+  });
+
+  it('переносит русский title с запасом для PNG-превью', () => {
+    const tpl = `<svg>
+      <foreignObject x="80" y="180" width="1040" height="280">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, system-ui, sans-serif; color: #F8FAFC; font-size: 60px; line-height: 1.18; font-weight: 700; word-wrap: break-word;">
+          {{TITLE}}
+        </div>
+      </foreignObject>
+    </svg>`;
+    const rendered = renderTemplate(
+      tpl,
+      'Табель: как автоматизация делает 3 ошибки регулярными',
+    );
+
+    expect(rendered).toContain('<tspan x="80" dy="0">Табель: как</tspan>');
+    expect(rendered).toContain('>автоматизация делает 3</tspan>');
+    expect(rendered).toContain('>ошибки регулярными</tspan>');
   });
 });
 
@@ -172,5 +207,63 @@ describe('generateCover', () => {
       toPng: async () => null,
     });
     expect(result.status).toBe('failed');
+  });
+});
+
+describe('cover templates', () => {
+  it('не содержат hardcoded placeholder-домены', async () => {
+    const files = await readdir(templatesDir);
+    const svgFiles = files.filter((file) => file.endsWith('.svg'));
+    expect(svgFiles.length).toBeGreaterThan(0);
+
+    for (const file of svgFiles) {
+      const content = await readFile(new URL(file, templatesDir), 'utf8');
+      expect(content, file).not.toMatch(/\b(?:acme\.)?example\.com\b/i);
+    }
+  });
+
+  it('dark-stripe использует брендовые цвета AI-Clone', async () => {
+    const content = await readFile(new URL('dark-stripe.svg', templatesDir), 'utf8');
+
+    expect(content).toContain('#17120F');
+    expect(content).toContain('#C7A27A');
+    expect(content).toContain('#F4EFEA');
+    expect(content).not.toContain('#141413');
+    expect(content).not.toContain('#d97757');
+    expect(content).not.toContain('#ede9e3');
+  });
+
+  it('все шаблоны остаются в брендовой палитре без белого и AI SaaS цветов', async () => {
+    const files = await readdir(templatesDir);
+    const svgFiles = files.filter((file) => file.endsWith('.svg'));
+    const forbidden = [
+      '#FFFFFF',
+      '#F1F5F9',
+      '#0F172A',
+      '#475569',
+      '#6D28D9',
+      '#1E40AF',
+      '#6366F1',
+      '#10B981',
+      '#DC2626',
+      '#d97757',
+      '#ede9e3',
+      '#141413',
+      'Georgia',
+      'Times New Roman',
+      'LONG READ',
+      'AI-Cofounder',
+      'МАНИФЕСТ',
+    ];
+
+    for (const file of svgFiles) {
+      const content = await readFile(new URL(file, templatesDir), 'utf8');
+      expect(content, file).toContain('#17120F');
+      expect(content, file).toContain('#C7A27A');
+      expect(content, file).toContain('#F4EFEA');
+      for (const token of forbidden) {
+        expect(content, `${file} contains ${token}`).not.toContain(token);
+      }
+    }
   });
 });
