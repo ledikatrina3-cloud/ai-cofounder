@@ -138,8 +138,26 @@ function fingerprint(markdown) {
   };
 }
 
+function publicationTimestamp(markdown) {
+  const frontmatter = markdown.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
+  if (!frontmatter) return null;
+
+  for (const key of ['publication_date', 'published_at', 'date']) {
+    const match = frontmatter.match(new RegExp(`^${key}:\\s*["']?([^"'\\r\\n]+)["']?\\s*$`, 'im'));
+    if (!match) continue;
+    const timestamp = Date.parse(match[1].trim());
+    if (Number.isFinite(timestamp)) return timestamp;
+  }
+  return null;
+}
+
 function articleInfo(path) {
-  return { path, fingerprint: fingerprint(readFileSync(path, 'utf8')) };
+  const markdown = readFileSync(path, 'utf8');
+  return {
+    path,
+    fingerprint: fingerprint(markdown),
+    publicationTimestamp: publicationTimestamp(markdown),
+  };
 }
 
 function recentArticles() {
@@ -147,38 +165,51 @@ function recentArticles() {
     .filter(isArticleMarkdown)
     .map((file) => join(contentDir, file))
     .filter((file) => resolve(file) !== candidatePath)
-    .map((file) => ({ file, mtimeMs: statSync(file).mtimeMs }))
-    .sort(
-      (left, right) => right.mtimeMs - left.mtimeMs || left.file.localeCompare(right.file, 'en'),
-    )
+    .map((file) => ({ ...articleInfo(file), mtimeMs: statSync(file).mtimeMs }))
+    .sort((left, right) => {
+      if (left.publicationTimestamp !== null || right.publicationTimestamp !== null) {
+        if (left.publicationTimestamp === null) return 1;
+        if (right.publicationTimestamp === null) return -1;
+        if (left.publicationTimestamp !== right.publicationTimestamp) {
+          return right.publicationTimestamp - left.publicationTimestamp;
+        }
+      }
+
+      // Filenames are the stable fallback; mtime only resolves an otherwise identical key.
+      return right.path.localeCompare(left.path, 'en') || right.mtimeMs - left.mtimeMs;
+    })
     .slice(0, recentLimit)
-    .map(({ file }) => articleInfo(file));
+    .map(
+      ({ mtimeMs: _mtimeMs, publicationTimestamp: _publicationTimestamp, ...article }) => article,
+    );
 }
 
-function dominantValue(values) {
+function dominantValues(values) {
   const counts = new Map();
   for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  const maximum = Math.max(0, ...counts.values());
+  if (maximum < 2) return [];
   return [...counts.entries()]
-    .filter(([, count]) => count >= 2)
-    .sort(
-      ([leftValue, leftCount], [rightValue, rightCount]) =>
-        rightCount - leftCount || leftValue.localeCompare(rightValue, 'en'),
-    )[0];
+    .filter(([, count]) => count === maximum)
+    .sort(([leftValue], [rightValue]) => leftValue.localeCompare(rightValue, 'en'));
 }
 
 const candidate = articleInfo(candidatePath);
 const recent = recentArticles();
 const issues = [];
-const dominantFormula = dominantValue(
+const dominantFormulas = dominantValues(
   recent.map(({ fingerprint: item }) => item.h1Formula).filter((formula) => formula !== 'other'),
 );
+const repeatedFormula = dominantFormulas.find(
+  ([formula]) => candidate.fingerprint.h1Formula === formula,
+);
 
-if (dominantFormula && candidate.fingerprint.h1Formula === dominantFormula[0]) {
+if (repeatedFormula) {
   issues.push({
     code: 'dominant_h1_formula',
-    message: `Candidate repeats the recent dominant H1 formula: ${dominantFormula[0]}.`,
-    formula: dominantFormula[0],
-    recentCount: dominantFormula[1],
+    message: `Candidate repeats the recent dominant H1 formula: ${repeatedFormula[0]}.`,
+    formula: repeatedFormula[0],
+    recentCount: repeatedFormula[1],
   });
 }
 

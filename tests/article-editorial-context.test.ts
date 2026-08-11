@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -144,6 +144,69 @@ describe('article editorial context CLI', () => {
     expect(result.status).toBe(1);
     expect(result.json.pass).toBe(false);
     expect(result.json.issues.map(({ code }) => code)).toContain('dominant_h1_formula');
+  });
+
+  it('hard-fails for every tied dominant H1 formula', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'editorial-context-'));
+    writeMarkdown(dir, '01.md', '# Почему заявки теряются\n\n## Наблюдение\n\nТекст.');
+    writeMarkdown(dir, '02.md', '# Почему сроки срываются\n\n## Наблюдение\n\nТекст.');
+    writeMarkdown(dir, '03.md', '# Как проверить отчет\n\n## Наблюдение\n\nТекст.');
+    writeMarkdown(dir, '04.md', '# Как найти владельца\n\n## Наблюдение\n\nТекст.');
+    const candidate = writeMarkdown(
+      dir,
+      'candidate.md',
+      '# Почему автоматизация не помогает\n\n## Вывод\n\nТекст.',
+    );
+
+    const result = runCli(candidate, dir, 4);
+
+    expect(result.status).toBe(1);
+    expect(result.json.issues.map(({ code }) => code)).toContain('dominant_h1_formula');
+  });
+
+  it('selects recent articles by stable frontmatter publication date instead of mtime', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'editorial-context-'));
+    const oldest = writeMarkdown(
+      dir,
+      'oldest.md',
+      '---\ndate: 2026-06-01\n---\n\n# Старая статья\n\n## Вывод\n\nТекст.',
+    );
+    const middle = writeMarkdown(
+      dir,
+      'middle.md',
+      '---\npublication_date: 2026-07-01\n---\n\n# Средняя статья\n\n## Вывод\n\nТекст.',
+    );
+    const newest = writeMarkdown(
+      dir,
+      'newest.md',
+      '---\npublished_at: 2026-08-01T09:00:00Z\n---\n\n# Новая статья\n\n## Вывод\n\nТекст.',
+    );
+    const candidate = writeMarkdown(dir, 'candidate.md', '# Кандидат\n\n## Вывод\n\nТекст.');
+    const now = new Date('2026-08-10T12:00:00Z');
+    utimesSync(oldest, now, now);
+    utimesSync(middle, new Date('2026-08-09T12:00:00Z'), new Date('2026-08-09T12:00:00Z'));
+    utimesSync(newest, new Date('2026-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z'));
+
+    const result = runCli(candidate, dir, 2);
+
+    expect(result.json.recent.map(({ path }) => basename(path))).toEqual([
+      'newest.md',
+      'middle.md',
+    ]);
+  });
+
+  it('uses a deterministic filename fallback when publication dates are absent', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'editorial-context-'));
+    const alpha = writeMarkdown(dir, 'alpha.md', '# Альфа\n\n## Вывод\n\nТекст.');
+    const beta = writeMarkdown(dir, 'beta.md', '# Бета\n\n## Вывод\n\nТекст.');
+    const candidate = writeMarkdown(dir, 'candidate.md', '# Кандидат\n\n## Вывод\n\nТекст.');
+    const now = new Date('2026-08-10T12:00:00Z');
+    utimesSync(alpha, now, now);
+    utimesSync(beta, new Date('2026-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z'));
+
+    const result = runCli(candidate, dir, 2);
+
+    expect(result.json.recent.map(({ path }) => basename(path))).toEqual(['beta.md', 'alpha.md']);
   });
 
   it('does not treat unrelated unclassified titles as one dominant formula', () => {
