@@ -5,6 +5,8 @@ const root = new URL('../', import.meta.url);
 const playbookPath = 'org/article-editorial-playbook.md';
 const entryPointPaths = [
   'agents/article-writer/prompt.md',
+  'article-writer-prompt.md',
+  'examples/agents/article-writer/prompt.md',
   'agents/article-writer/rules.md',
   'skills/article-writing/SKILL.md',
 ] as const;
@@ -129,10 +131,12 @@ describe('article editorial architecture', () => {
       const sectionBody = playbook.slice(sectionStart, sectionEnd).trim();
 
       for (const feature of requiredFeatures) {
-        expect.soft(
-          feature.test(sectionBody),
-          `${concern} policy section misses required feature: ${feature.source}`,
-        ).toBe(true);
+        expect
+          .soft(
+            feature.test(sectionBody),
+            `${concern} policy section misses required feature: ${feature.source}`,
+          )
+          .toBe(true);
       }
     }
   });
@@ -169,10 +173,12 @@ describe('article editorial architecture', () => {
             .filter((signature) => signature.test(block))
             .map((signature) => signature.source);
 
-          expect.soft(
-            matchedSignals.length,
-            `${concern} policy is duplicated in a detailed block of ${path}: ${matchedSignals.join(', ')}`,
-          ).toBeLessThan(3);
+          expect
+            .soft(
+              matchedSignals.length,
+              `${concern} policy is duplicated in a detailed block of ${path}: ${matchedSignals.join(', ')}`,
+            )
+            .toBeLessThan(3);
         }
       }
     }

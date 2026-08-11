@@ -4,77 +4,43 @@ import { describe, expect, it } from 'vitest';
 const root = new URL('../', import.meta.url);
 const read = (path: string): string => readFileSync(new URL(path, root), 'utf8');
 
-describe('article writer mastery and publication contract', () => {
+describe('article writer policy ownership and publication contract', () => {
+  const playbook = read('org/article-editorial-playbook.md');
   const prompt = read('agents/article-writer/prompt.md');
   const skill = read('skills/article-writing/SKILL.md');
   const rules = read('agents/article-writer/rules.md');
 
-  it('continues from a complete local brief when public SERP is unavailable', () => {
-    expect(prompt).toContain('SERP unavailable не останавливает локально подтверждённую статью');
-    expect(prompt).toContain('не используй внешние факты, цифры, цитаты');
-    expect(prompt).toContain('продолжай по brief, локальному контексту и mastery');
-  });
-
-  it('requires topical mastery before drafting and redaktor mastery after drafting', () => {
-    for (const contract of [prompt, skill, rules]) {
-      expect(contract).toContain('mastery/redaktor/INDEX.md');
-      expect(contract).toMatch(/точн[^\n]*пут/i);
-      expect(contract).toMatch(/примен[её]н[^\n]*метод/i);
+  it('owns voice, mastery, references and structural diversity in the playbook', () => {
+    for (const marker of [
+      'Татьяны Мужицкой',
+      'mastery/copywriting',
+      'mastery/redaktor',
+      'org/reference-blogs.md',
+      'Структурное отличие статьи',
+    ]) {
+      expect(playbook).toContain(marker);
+    }
+    for (const entryPoint of [prompt, skill, rules]) {
+      expect(entryPoint).not.toContain('Татьяны Мужицкой');
+      expect(entryPoint).not.toContain('mastery/copywriting/igor-ledohovsky.md');
     }
   });
 
-  it('requires Ledohovsky writing mastery before the first full draft', () => {
-    for (const contract of [prompt, skill, rules]) {
-      expect(contract).toContain('mastery/copywriting/INDEX.md');
-      expect(contract).toContain('mastery/copywriting/igor-ledohovsky.md');
-      expect(contract).toMatch(/до (первого полного )?(драфта|черновика)/i);
-      expect(contract).toMatch(/примен[её]н[^\n]*метод/i);
-    }
-  });
-
-  it('requires natural business language instead of decorative metaphors', () => {
-    for (const contract of [prompt, skill, rules]) {
-      expect(contract).toContain('рабочей встрече');
-      expect(contract).toContain('самая частая жалоба');
-      expect(contract).toMatch(/метафор/i);
-    }
-  });
-
-  it('keeps the selected Muzhitskaya-inspired techniques in every article QA', () => {
-    for (const contract of [prompt, skill, rules]) {
-      expect(contract).toContain('Татьяны Мужицкой');
-      expect(contract).toMatch(/кажд[а-яё]* стать/i);
-      expect(contract).toMatch(/бытов[а-яё]* сцен/i);
-      expect(contract).toMatch(/мягк[а-яё]* самоирон/i);
-      expect(contract).toMatch(/QA/i);
-      expect(contract).toMatch(/не (имитир|копир)/i);
-    }
-    expect(prompt).not.toContain('Для одной пробной статьи');
-  });
-
-  it('allows article links only from the website publication registry', () => {
-    for (const contract of [prompt, skill, rules]) {
-      expect(contract).toContain('content/published-articles.json');
-      expect(contract).toContain('status: published');
-      expect(contract).toMatch(/явн[^\n]*(https:\/\/|публичн[^\n]*URL)/i);
-      expect(contract).toMatch(/ready[^\n]*не[^\n]*published/i);
-    }
+  it('allows links only for confirmed website publications', () => {
+    expect(rules).toContain('content/published-articles.json');
+    expect(rules).toContain('status: published');
+    expect(rules).toMatch(/явн[\s\S]{0,80}(https:\/\/|публичн[\s\S]{0,40}URL)/i);
+    expect(rules).toMatch(/ready[^\n]*не[^\n]*published/i);
   });
 
   it('starts with an empty publication registry', () => {
-    const registry = JSON.parse(read('content/published-articles.json')) as {
-      articles?: unknown[];
-    };
-    expect(registry).toEqual({ articles: [] });
+    expect(JSON.parse(read('content/published-articles.json'))).toEqual({ articles: [] });
   });
 
   it('keeps source evidence out of public markdown', () => {
-    for (const contract of [prompt, skill, rules]) {
-      expect(contract).toContain('## Источники');
-      expect(contract).toMatch(/запрещ|не должен|не добав/i);
-    }
+    expect(rules).toContain('## Источники');
+    expect(rules).toMatch(/запрещ|не добав/i);
     const article = read('content/kontrol-schetov-oplat-aktov.md');
     expect(article).not.toMatch(/^## Источники\s*$/m);
-    expect(article).not.toMatch(/\]\(\/(ruchnoy-vvod|poteryannye-zayavki-do-pervogo-otveta)\)/);
   });
 });

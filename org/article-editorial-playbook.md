@@ -22,7 +22,11 @@ Prompt, rules и skill управляют маршрутом, но не повт
 <!-- editorial-policy:mastery -->
 ## Mastery как наблюдаемое решение
 
-До черновика writer открывает `mastery/INDEX.md`, выбирает профильные материалы и конкретный метод или прием. Для каждого выбора в editorial context фиксируются:
+До черновика writer открывает `mastery/INDEX.md`, `mastery/copywriting/INDEX.md`,
+`mastery/copywriting/igor-ledohovsky.md` и профильные материалы, затем выбирает
+конкретный метод или прием. После черновика редактор сверяется с
+`mastery/redaktor/INDEX.md` и рекомендованным им материалом. Для каждого выбора
+в editorial context фиксируются:
 
 1. `problem` - какую проблему будущего текста решает метод;
 2. `location` - где именно в статье он будет применен;
