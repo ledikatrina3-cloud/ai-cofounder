@@ -47,16 +47,10 @@
 1. Выполни предчерновые решения playbook и сохрани единый
    `content/<slug>.editorial-context.json`: reference evidence, mastery evidence,
    корпус сравнения, кандидатные композиции и выбор.
-2. Создай fingerprint кандидата:
+2. Проверь предчерновой evidence:
 
 ```bash
-node scripts/article-editorial-context.mjs content/<slug>.md --content-dir content --recent 5
-```
-
-3. Проверь evidence до черновика и после его редактуры:
-
-```bash
-node scripts/article-editorial-context.mjs --validate-evidence content/<slug>.editorial-context.json --registry org/reference-blogs.md
+node scripts/article-editorial-context.mjs --validate-evidence content/<slug>.editorial-context.json --registry org/reference-blogs.md --phase pre
 ```
 
 Ненулевой код - hard gate.
@@ -68,7 +62,13 @@ node scripts/article-editorial-context.mjs --validate-evidence content/<slug>.ed
    проблемы для бизнеса, а не с технической инструкции. Термины сразу переводи
    на язык действий и последствий.
 3. Не выдумывай кейс, личный опыт, возможности продукта или результаты.
-4. После полного черновика дополни post-draft evidence и снова запусти validator.
+4. После полного черновика создай fingerprint, дополни post-draft evidence и
+   запусти полный validator:
+
+```bash
+node scripts/article-editorial-context.mjs content/<slug>.md --content-dir content --recent 5
+node scripts/article-editorial-context.mjs --validate-evidence content/<slug>.editorial-context.json --registry org/reference-blogs.md
+```
 
 ## 4. Детерминированный QA
 

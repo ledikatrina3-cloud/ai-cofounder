@@ -8,7 +8,7 @@ import {
   normalizeReferenceUrl,
 } from '../skills/research-serp/scripts/reference-blogs.js';
 
-function runValidation(evidence: unknown, registry: string[]) {
+function runValidation(evidence: unknown, registry: string[], phase?: 'pre') {
   const dir = mkdtempSync(join(tmpdir(), 'editorial-evidence-'));
   const evidencePath = join(dir, 'evidence.json');
   const registryPath = join(dir, 'references.md');
@@ -18,17 +18,15 @@ function runValidation(evidence: unknown, registry: string[]) {
     registry.map((url) => `| ${url} | test purpose |`).join('\n'),
     'utf8',
   );
-  const result = spawnSync(
-    'node',
-    [
-      'scripts/article-editorial-context.mjs',
-      '--validate-evidence',
-      evidencePath,
-      '--registry',
-      registryPath,
-    ],
-    { cwd: process.cwd(), encoding: 'utf8' },
-  );
+  const validationArgs = [
+    'scripts/article-editorial-context.mjs',
+    '--validate-evidence',
+    evidencePath,
+    '--registry',
+    registryPath,
+  ];
+  if (phase !== undefined) validationArgs.push('--phase', phase);
+  const result = spawnSync('node', validationArgs, { cwd: process.cwd(), encoding: 'utf8' });
   return { status: result.status, stderr: result.stderr, json: JSON.parse(result.stdout) };
 }
 
@@ -103,6 +101,19 @@ describe('editorial evidence validation', () => {
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
     expect(result.json).toEqual({ pass: true, issues: [] });
+  });
+
+  it('accepts pre-draft evidence before post-draft revisions exist', () => {
+    const evidence = validEvidence();
+    evidence.mastery.post_draft = [];
+
+    expect(runValidation(evidence, references, 'pre')).toMatchObject({
+      status: 0,
+      json: { pass: true, issues: [] },
+    });
+    expect(runValidation(evidence, references).json.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'mastery_post_draft_required' })]),
+    );
   });
 
   it('requires exactly one attempt for every enabled registry URL', () => {

@@ -71,7 +71,7 @@ function validateMasterySource(issues, value, path) {
   }
 }
 
-export function validateEditorialEvidence(evidence, enabledReferenceUrls) {
+export function validateEditorialEvidence(evidence, enabledReferenceUrls, phase = 'complete') {
   const issues = [];
   const references = Array.isArray(evidence?.references) ? evidence.references : [];
   const expected = enabledReferenceUrls.map(normalizedReferenceUrl);
@@ -160,7 +160,7 @@ export function validateEditorialEvidence(evidence, enabledReferenceUrls) {
   }
 
   const postDraft = Array.isArray(evidence?.mastery?.post_draft) ? evidence.mastery.post_draft : [];
-  if (postDraft.length === 0)
+  if (phase !== 'pre' && postDraft.length === 0)
     issues.push({
       code: 'mastery_post_draft_required',
       path: 'mastery.post_draft',
@@ -193,7 +193,15 @@ if (evidencePathArg) {
   let result;
   try {
     const evidence = JSON.parse(readFileSync(resolve(evidencePathArg), 'utf8'));
-    result = validateEditorialEvidence(evidence, registryUrls(readFileSync(registryPath, 'utf8')));
+    const phase = readOption('--phase', 'complete');
+    if (phase !== 'pre' && phase !== 'complete') {
+      throw new Error('--phase must be pre or complete');
+    }
+    result = validateEditorialEvidence(
+      evidence,
+      registryUrls(readFileSync(registryPath, 'utf8')),
+      phase,
+    );
   } catch (error) {
     result = {
       pass: false,
